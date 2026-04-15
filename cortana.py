@@ -12,6 +12,7 @@ Mejoras v3:
 """
 
 import os
+import sys
 import json
 import asyncio
 import logging
@@ -41,12 +42,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 # ─── Variables de entorno ──────────────────────────────────────────────────────
-ALPACA_API_KEY    = os.environ["ALPACA_API_KEY"]
-ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
-GROQ_API_KEY      = os.environ["GROQ_API_KEY"]
-TELEGRAM_TOKEN    = os.environ["TELEGRAM_TOKEN"]
-TELEGRAM_CHAT_ID  = os.environ["TELEGRAM_CHAT_ID"]
-NEWS_API_KEY      = os.environ["NEWS_API_KEY"]
+try:
+    ALPACA_API_KEY    = os.environ["ALPACA_API_KEY"]
+    ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
+    GROQ_API_KEY      = os.environ["GROQ_API_KEY"]
+    TELEGRAM_TOKEN    = os.environ["TELEGRAM_TOKEN"]
+    TELEGRAM_CHAT_ID  = os.environ["TELEGRAM_CHAT_ID"]
+    NEWS_API_KEY      = os.environ["NEWS_API_KEY"]
+except KeyError as e:
+    log.error(f"⚠️ ERROR FATAL: Falta configurar la variable de entorno {e} en el panel de Railway.")
+    log.error("Por favor, entra a tu proyecto en Railway, ve a la pestaña 'Variables' y añádela.")
+    sys.exit(1)
 
 # ─── Watchlist ─────────────────────────────────────────────────────────────────
 WATCHLIST = ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA", "JPM", "V", "WMT"]
