@@ -4,3 +4,4 @@ ta
 alpaca-py
 python-telegram-bot
 requests
+pytz
