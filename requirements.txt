@@ -1,0 +1,6 @@
+groq
+pandas
+ta
+alpaca-py
+python-telegram-bot
+requests
