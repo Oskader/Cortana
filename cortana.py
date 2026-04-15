@@ -18,6 +18,7 @@ import asyncio
 import logging
 import requests
 from datetime import datetime, timedelta
+import pytz
 from typing import Optional
 
 from groq import Groq
@@ -436,21 +437,23 @@ async def notify_telegram(decision: dict, resultado: str):
 async def analysis_loop():
     log.info("🚀 Bot v3 iniciado — MACD + Bollinger + ATR activos")
 
+    ET = pytz.timezone("America/New_York")  # Zona horaria del NYSE/NASDAQ
+
     while True:
-        now  = datetime.now()
+        now  = datetime.now(ET)   # Hora actual en Nueva York (correcta sin importar el servidor)
         hora = now.hour
         min_ = now.minute
         dia  = now.weekday()
 
-        # Mercado abierto lunes-viernes 10:30am-5pm Colombia
+        # Mercado abierto lunes-viernes 9:30am-4:00pm ET (hora de Nueva York)
         mercado_abierto = (
             dia < 5 and
-            (hora > 10 or (hora == 10 and min_ >= 30)) and
-            hora < 17
+            (hora > 9 or (hora == 9 and min_ >= 30)) and
+            hora < 16
         )
 
         if mercado_abierto:
-            log.info(f"🔍 Analizando mercado ({now.strftime('%H:%M')})...")
+            log.info(f"🔍 Analizando mercado ({now.strftime('%H:%M')} ET)...")
             portfolio = get_portfolio_info()
 
             for symbol in WATCHLIST:
