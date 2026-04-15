@@ -1,11 +1,14 @@
 """
-Trading Bot Autónomo v4
+Trading Bot Autónomo v3
 Groq + Alpaca + NewsAPI + Telegram
 
-Cambios v4:
-- Watchlist de 50 acciones diversificadas
-- Claves leídas desde variables de entorno (GitHub Secrets / Railway / Render)
-- Sin archivo .env — seguro para subir a GitHub
+Mejoras v3:
+- Nuevos indicadores: MACD, Bandas de Bollinger, ATR
+- Sistema de confianza por puntos (cada indicador aporta/resta)
+- Stop Loss dinámico basado en ATR (no porcentaje fijo)
+- La IA recibe todos los indicadores calculados con sus puntuaciones
+- Revisión cada 5 minutos en horario de mercado
+- Ejecución totalmente automática
 """
 
 import os
@@ -26,11 +29,15 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from telegram import Bot
+from dotenv import load_dotenv
 
-# ─── Claves (se leen desde GitHub Secrets o variables de entorno del servidor) ─
-# NUNCA escribas los valores aquí directamente.
-# En GitHub: Settings → Secrets and variables → Actions → New secret
-# En Railway/Render: se configuran en el dashboard del servicio
+load_dotenv()
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
+# ─── Variables de entorno ──────────────────────────────────────────────────────
 ALPACA_API_KEY    = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
 GROQ_API_KEY      = os.environ["GROQ_API_KEY"]
@@ -38,158 +45,68 @@ TELEGRAM_TOKEN    = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID  = os.environ["TELEGRAM_CHAT_ID"]
 NEWS_API_KEY      = os.environ["NEWS_API_KEY"]
 
-# ─── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
+# ─── Watchlist ─────────────────────────────────────────────────────────────────
+WATCHLIST = ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA", "JPM", "V", "WMT"]
 
-# ─── Watchlist — 50 acciones diversificadas ────────────────────────────────────
-# Criterios de selección:
-# - Alta liquidez (fácil comprar y vender sin mover el precio)
-# - Cobertura de todos los sectores principales del S&P 500
-# - Mezcla de large caps estables + algunas de alto crecimiento
-
-WATCHLIST = [
-    # Tecnología (12)
-    "AAPL",  # Apple
-    "MSFT",  # Microsoft
-    "GOOGL", # Google
-    "NVDA",  # Nvidia
-    "META",  # Meta
-    "AMZN",  # Amazon
-    "AMD",   # AMD
-    "ORCL",  # Oracle
-    "CRM",   # Salesforce
-    "ADBE",  # Adobe
-    "NFLX",  # Netflix
-    "INTC",  # Intel
-
-    # Vehículos / Energía (6)
-    "TSLA",  # Tesla
-    "F",     # Ford
-    "GM",    # General Motors
-    "XOM",   # ExxonMobil
-    "CVX",   # Chevron
-    "NEE",   # NextEra Energy
-
-    # Finanzas (8)
-    "JPM",   # JPMorgan
-    "V",     # Visa
-    "MA",    # Mastercard
-    "BAC",   # Bank of America
-    "GS",    # Goldman Sachs
-    "MS",    # Morgan Stanley
-    "BRK-B", # Berkshire Hathaway
-    "AXP",   # American Express
-
-    # Salud / Pharma (7)
-    "JNJ",   # Johnson & Johnson
-    "PFE",   # Pfizer
-    "UNH",   # UnitedHealth
-    "ABBV",  # AbbVie
-    "LLY",   # Eli Lilly
-    "MRK",   # Merck
-    "TMO",   # Thermo Fisher
-
-    # Consumo / Retail (7)
-    "WMT",   # Walmart
-    "COST",  # Costco
-    "MCD",   # McDonald's
-    "SBUX",  # Starbucks
-    "NKE",   # Nike
-    "PG",    # Procter & Gamble
-    "KO",    # Coca-Cola
-
-    # Industrial / Infraestructura (5)
-    "CAT",   # Caterpillar
-    "BA",    # Boeing
-    "HON",   # Honeywell
-    "UPS",   # UPS
-    "DE",    # John Deere
-
-    # Semiconductores / Hardware (3)
-    "QCOM",  # Qualcomm
-    "AVGO",  # Broadcom
-    "TXN",   # Texas Instruments
-
-    # ETFs — para capturar movimientos del mercado general (4)
-    "SPY",   # S&P 500
-    "QQQ",   # NASDAQ 100
-    "DIA",   # Dow Jones
-    "IWM",   # Russell 2000 (pequeñas empresas)
-
-    # Comunicaciones (3)
-    "DIS",   # Disney
-    "T",     # AT&T
-    "VZ",    # Verizon
-]
-
-# Nombres para búsqueda de noticias
 COMPANY_NAMES = {
-    "AAPL":"Apple","MSFT":"Microsoft","GOOGL":"Google","NVDA":"Nvidia",
-    "META":"Meta Facebook","AMZN":"Amazon","AMD":"AMD","ORCL":"Oracle",
-    "CRM":"Salesforce","ADBE":"Adobe","NFLX":"Netflix","INTC":"Intel",
-    "TSLA":"Tesla","F":"Ford","GM":"General Motors","XOM":"ExxonMobil",
-    "CVX":"Chevron","NEE":"NextEra Energy","JPM":"JPMorgan","V":"Visa",
-    "MA":"Mastercard","BAC":"Bank of America","GS":"Goldman Sachs",
-    "MS":"Morgan Stanley","BRK-B":"Berkshire Hathaway","AXP":"American Express",
-    "JNJ":"Johnson Johnson","PFE":"Pfizer","UNH":"UnitedHealth","ABBV":"AbbVie",
-    "LLY":"Eli Lilly","MRK":"Merck","TMO":"Thermo Fisher","WMT":"Walmart",
-    "COST":"Costco","MCD":"McDonalds","SBUX":"Starbucks","NKE":"Nike",
-    "PG":"Procter Gamble","KO":"Coca-Cola","CAT":"Caterpillar","BA":"Boeing",
-    "HON":"Honeywell","UPS":"UPS","DE":"John Deere","QCOM":"Qualcomm",
-    "AVGO":"Broadcom","TXN":"Texas Instruments","SPY":"S&P 500 ETF",
-    "QQQ":"NASDAQ ETF","DIA":"Dow Jones ETF","IWM":"Russell 2000 ETF",
-    "DIS":"Disney","T":"AT&T","VZ":"Verizon",
+    "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Google",
+    "NVDA": "Nvidia", "META": "Meta Facebook", "AMZN": "Amazon",
+    "TSLA": "Tesla", "JPM": "JPMorgan", "V": "Visa", "WMT": "Walmart"
 }
 
-# ─── Inversión según confianza ──────────────────────────────────────────────────
+# ─── Inversión según confianza ─────────────────────────────────────────────────
 def get_investment_pct(confianza: int) -> float:
-    if confianza <= 5:   return 0.00
+    if confianza <= 5:  return 0.00
     elif confianza <= 8: return 0.05
     elif confianza == 9: return 0.10
-    else:                return 0.15
+    else:               return 0.15
 
-# ─── Prompt de la IA ────────────────────────────────────────────────────────────
+# ─── Prompt de la IA ───────────────────────────────────────────────────────────
 TRADING_RULES = """
-Eres un trader algorítmico experto. Recibirás datos técnicos con puntuación
-pre-calculada por indicador, más noticias recientes de las últimas 24h.
+Eres un trader algorítmico experto. Recibirás datos técnicos ya analizados con una
+puntuación pre-calculada por cada indicador, más noticias recientes.
 
-INTERPRETACIÓN DE PUNTOS TÉCNICOS:
-  Suma 8-12 → confianza base 9-10 (señal excepcional)
-  Suma 5-7  → confianza base 7-8  (señal sólida)
-  Suma 2-4  → confianza base 5-6  (señal débil)
-  Suma < 2  → confianza base 1-4  (no operar)
+Tu trabajo es revisar el análisis técnico, considerar las noticias, y dar una
+decisión final con un nivel de confianza del 1 al 10.
+
+PUNTUACIÓN DE INDICADORES (ya calculada, úsala como base):
+Cada indicador tiene una puntuación parcial. La suma total te sugiere la confianza:
+  - Suma 8-12 puntos  → confianza 9-10 (señal excepcional)
+  - Suma 5-7 puntos   → confianza 7-8  (señal sólida)
+  - Suma 2-4 puntos   → confianza 5-6  (señal débil)
+  - Suma menor a 2    → confianza 1-4  (no operar)
 
 AJUSTE POR NOTICIAS:
-  Noticias muy positivas (contrato enorme, ganancias récord): +1 o +2
-  Noticias neutras o sin noticias: sin cambio
-  Noticias negativas moderadas: -1 o -2
-  Noticias graves (bancarrota, fraude, escándalo): confianza final máxima 3, acción = "nada"
+  - Noticias muy positivas (contrato enorme, ganancias récord): +1 o +2 a la confianza
+  - Noticias neutras o sin noticias: sin cambio
+  - Noticias negativas moderadas: -1 o -2
+  - Noticias graves (bancarrota, fraude, escándalo): confianza final máxima = 3, acción = "nada"
 
-STOP LOSS Y TAKE PROFIT DINÁMICOS (usa el ATR):
-  stop_loss   = precio_actual - (2 × ATR)
-  take_profit = precio_actual + (3 × ATR)
+STOP LOSS DINÁMICO (basado en ATR):
+  - Usa el ATR recibido para calcular stop_loss = precio_actual - (2 × ATR)
+  - Usa take_profit = precio_actual + (3 × ATR)
+  - Esto hace que el stop loss se adapte a la volatilidad real de la acción
 
-ESCALA DE INVERSIÓN:
-  Confianza 1-5:  no operar  (0%)
-  Confianza 6-8:  operar con 5% del portafolio
-  Confianza 9:    operar con 10% del portafolio
-  Confianza 10:   operar con 15% del portafolio
+ESCALA DE INVERSIÓN (para incluir en tu razonamiento):
+  - Confianza 1-5:  no operar
+  - Confianza 6-8:  5% del portafolio
+  - Confianza 9:    10% del portafolio
+  - Confianza 10:   15% del portafolio
 
-Responde ÚNICAMENTE con este JSON sin texto adicional:
+Responde ÚNICAMENTE con este JSON, sin texto adicional:
 {
   "accion": "comprar" o "vender" o "nada",
   "simbolo": "TICKER",
   "confianza": numero del 1 al 10,
-  "puntos_tecnicos": numero,
-  "razon_tecnica": "explicación clara en español",
-  "razon_noticias": "impacto de las noticias en español",
+  "puntos_tecnicos": numero (suma de puntos de indicadores),
+  "razon_tecnica": "explicación clara en español de los indicadores",
+  "razon_noticias": "impacto de las noticias en la decisión",
   "stop_loss": numero,
   "take_profit": numero
 }
 """
 
-# ─── Clientes ───────────────────────────────────────────────────────────────────
+# ─── Clientes ──────────────────────────────────────────────────────────────────
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=True)
 data_client    = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
 groq_client    = Groq(api_key=GROQ_API_KEY)
@@ -197,7 +114,7 @@ telegram_bot   = Bot(token=TELEGRAM_TOKEN)
 
 recently_traded = {}
 
-# ─── Indicadores técnicos con puntuación ────────────────────────────────────────
+# ─── Calcular indicadores técnicos con puntuación ─────────────────────────────
 def get_stock_data(symbol: str) -> Optional[dict]:
     try:
         request = StockBarsRequest(
@@ -212,16 +129,29 @@ def get_stock_data(symbol: str) -> Optional[dict]:
         if df.empty or len(df) < 30:
             return None
 
-        df["rsi"]     = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-        df["sma_50"]  = ta.trend.SMAIndicator(df["close"], window=min(50, len(df))).sma_indicator()
-        macd_ind      = ta.trend.MACD(df["close"], window_slow=26, window_fast=12, window_sign=9)
-        df["macd"]    = macd_ind.macd()
-        df["macd_sig"]= macd_ind.macd_signal()
-        bb            = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
-        df["bb_upper"]= bb.bollinger_hband()
-        df["bb_lower"]= bb.bollinger_lband()
-        df["bb_mid"]  = bb.bollinger_mavg()
-        df["atr"]     = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=14).average_true_range()
+        # ── Calcular todos los indicadores ──
+        # RSI
+        df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+
+        # SMA 50
+        df["sma_50"] = ta.trend.SMAIndicator(df["close"], window=min(50, len(df))).sma_indicator()
+
+        # MACD
+        macd_ind       = ta.trend.MACD(df["close"], window_slow=26, window_fast=12, window_sign=9)
+        df["macd"]     = macd_ind.macd()
+        df["macd_sig"] = macd_ind.macd_signal()
+        df["macd_diff"]= macd_ind.macd_diff()  # histograma
+
+        # Bandas de Bollinger
+        bb             = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
+        df["bb_upper"] = bb.bollinger_hband()
+        df["bb_lower"] = bb.bollinger_lband()
+        df["bb_mid"]   = bb.bollinger_mavg()
+
+        # ATR (volatilidad real)
+        df["atr"] = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=14).average_true_range()
+
+        # Volumen promedio
         df["vol_avg"] = df["volume"].rolling(window=20).mean()
 
         latest = df.iloc[-1]
@@ -233,7 +163,7 @@ def get_stock_data(symbol: str) -> Optional[dict]:
         macd      = float(latest["macd"])      if pd.notna(latest["macd"])     else None
         macd_sig  = float(latest["macd_sig"])  if pd.notna(latest["macd_sig"]) else None
         macd_prev = float(prev["macd"])        if pd.notna(prev["macd"])       else None
-        macd_sigp = float(prev["macd_sig"])    if pd.notna(prev["macd_sig"])   else None
+        macd_sig_p= float(prev["macd_sig"])    if pd.notna(prev["macd_sig"])   else None
         bb_upper  = float(latest["bb_upper"])  if pd.notna(latest["bb_upper"]) else None
         bb_lower  = float(latest["bb_lower"])  if pd.notna(latest["bb_lower"]) else None
         bb_mid    = float(latest["bb_mid"])    if pd.notna(latest["bb_mid"])   else None
@@ -241,67 +171,74 @@ def get_stock_data(symbol: str) -> Optional[dict]:
         volumen   = int(latest["volume"])
         vol_avg   = int(latest["vol_avg"])     if pd.notna(latest["vol_avg"])  else None
 
+        # ── Calcular puntuación por indicador ──
         puntos = {}
         total  = 0
 
         # RSI
         if rsi is not None:
             if rsi < 30:
-                puntos["rsi"] = {"valor": round(rsi,1), "pts": 3, "señal": "muy sobrevendida"}; total += 3
+                puntos["rsi"] = {"valor": round(rsi, 1), "pts": 3, "señal": "muy sobrevendida"}; total += 3
             elif rsi < 35:
-                puntos["rsi"] = {"valor": round(rsi,1), "pts": 2, "señal": "sobrevendida"}; total += 2
+                puntos["rsi"] = {"valor": round(rsi, 1), "pts": 2, "señal": "sobrevendida"}; total += 2
             elif rsi < 65:
-                puntos["rsi"] = {"valor": round(rsi,1), "pts": 0, "señal": "neutral"}
+                puntos["rsi"] = {"valor": round(rsi, 1), "pts": 0, "señal": "neutral"}
             elif rsi < 70:
-                puntos["rsi"] = {"valor": round(rsi,1), "pts": -1, "señal": "acercándose a sobrecompra"}; total -= 1
+                puntos["rsi"] = {"valor": round(rsi, 1), "pts": -1, "señal": "acercándose a sobrecompra"}; total -= 1
             else:
-                puntos["rsi"] = {"valor": round(rsi,1), "pts": -2, "señal": "sobrecomprada"}; total -= 2
+                puntos["rsi"] = {"valor": round(rsi, 1), "pts": -2, "señal": "sobrecomprada"}; total -= 2
 
         # SMA50
         if sma_50 is not None:
-            diff = (precio - sma_50) / sma_50 * 100
-            if diff > 2:
-                puntos["sma50"] = {"valor": round(sma_50,2), "diff_%": round(diff,1), "pts": 2, "señal": "tendencia alcista fuerte"}; total += 2
-            elif diff > 0:
-                puntos["sma50"] = {"valor": round(sma_50,2), "diff_%": round(diff,1), "pts": 1, "señal": "sobre la media"}; total += 1
+            diff_pct = (precio - sma_50) / sma_50 * 100
+            if diff_pct > 2:
+                puntos["sma50"] = {"valor": round(sma_50, 2), "diff_%": round(diff_pct, 1), "pts": 2, "señal": "tendencia alcista fuerte"}; total += 2
+            elif diff_pct > 0:
+                puntos["sma50"] = {"valor": round(sma_50, 2), "diff_%": round(diff_pct, 1), "pts": 1, "señal": "sobre la media"}; total += 1
             else:
-                puntos["sma50"] = {"valor": round(sma_50,2), "diff_%": round(diff,1), "pts": -1, "señal": "bajo la media"}; total -= 1
+                puntos["sma50"] = {"valor": round(sma_50, 2), "diff_%": round(diff_pct, 1), "pts": -1, "señal": "bajo la media"}; total -= 1
 
         # MACD
-        if macd is not None and macd_sig is not None and macd_prev is not None:
-            if macd_prev < macd_sigp and macd > macd_sig:
-                puntos["macd"] = {"valor": round(macd,3), "pts": 2, "señal": "cruce alcista reciente"}; total += 2
+        if macd is not None and macd_sig is not None:
+            cruce_alcista = macd_prev < macd_sig_p and macd > macd_sig  # cruzó hacia arriba
+            cruce_bajista = macd_prev > macd_sig_p and macd < macd_sig  # cruzó hacia abajo
+            if cruce_alcista:
+                puntos["macd"] = {"valor": round(macd, 3), "señal_val": round(macd_sig, 3), "pts": 2, "señal": "cruce alcista reciente"}; total += 2
             elif macd > macd_sig and macd > 0:
-                puntos["macd"] = {"valor": round(macd,3), "pts": 1, "señal": "positivo y subiendo"}; total += 1
-            elif macd_prev > macd_sigp and macd < macd_sig:
-                puntos["macd"] = {"valor": round(macd,3), "pts": -2, "señal": "cruce bajista reciente"}; total -= 2
+                puntos["macd"] = {"valor": round(macd, 3), "señal_val": round(macd_sig, 3), "pts": 1, "señal": "positivo y subiendo"}; total += 1
+            elif cruce_bajista:
+                puntos["macd"] = {"valor": round(macd, 3), "señal_val": round(macd_sig, 3), "pts": -2, "señal": "cruce bajista reciente"}; total -= 2
             else:
-                puntos["macd"] = {"valor": round(macd,3), "pts": -1, "señal": "negativo o bajando"}; total -= 1
+                puntos["macd"] = {"valor": round(macd, 3), "señal_val": round(macd_sig, 3), "pts": -1, "señal": "negativo o bajando"}; total -= 1
 
-        # Bollinger
-        if bb_upper is not None and bb_lower is not None:
+        # Bandas de Bollinger
+        if bb_upper is not None and bb_lower is not None and bb_mid is not None:
             rango = bb_upper - bb_lower
-            pos   = (precio - bb_lower) / rango if rango > 0 else 0.5
+            pos   = (precio - bb_lower) / rango if rango > 0 else 0.5  # 0=banda inf, 1=banda sup
             if pos <= 0.1:
-                puntos["bollinger"] = {"pos_%": round(pos*100,1), "bb_lower": round(bb_lower,2), "bb_upper": round(bb_upper,2), "pts": 2, "señal": "tocando banda inferior"}; total += 2
+                puntos["bollinger"] = {"precio_vs_banda": round(pos*100, 1), "bb_lower": round(bb_lower, 2), "bb_upper": round(bb_upper, 2), "pts": 2, "señal": "tocando banda inferior (muy barato)"}; total += 2
             elif pos <= 0.35:
-                puntos["bollinger"] = {"pos_%": round(pos*100,1), "bb_lower": round(bb_lower,2), "bb_upper": round(bb_upper,2), "pts": 1, "señal": "tercio inferior"}; total += 1
+                puntos["bollinger"] = {"precio_vs_banda": round(pos*100, 1), "bb_lower": round(bb_lower, 2), "bb_upper": round(bb_upper, 2), "pts": 1, "señal": "tercio inferior de las bandas"}; total += 1
             elif pos <= 0.65:
-                puntos["bollinger"] = {"pos_%": round(pos*100,1), "pts": 0, "señal": "zona media"}
+                puntos["bollinger"] = {"precio_vs_banda": round(pos*100, 1), "bb_lower": round(bb_lower, 2), "bb_upper": round(bb_upper, 2), "pts": 0, "señal": "zona media"}
             elif pos <= 0.9:
-                puntos["bollinger"] = {"pos_%": round(pos*100,1), "bb_lower": round(bb_lower,2), "bb_upper": round(bb_upper,2), "pts": -1, "señal": "tercio superior"}; total -= 1
+                puntos["bollinger"] = {"precio_vs_banda": round(pos*100, 1), "bb_lower": round(bb_lower, 2), "bb_upper": round(bb_upper, 2), "pts": -1, "señal": "tercio superior"}; total -= 1
             else:
-                puntos["bollinger"] = {"pos_%": round(pos*100,1), "bb_lower": round(bb_lower,2), "bb_upper": round(bb_upper,2), "pts": -2, "señal": "tocando banda superior"}; total -= 2
+                puntos["bollinger"] = {"precio_vs_banda": round(pos*100, 1), "bb_lower": round(bb_lower, 2), "bb_upper": round(bb_upper, 2), "pts": -2, "señal": "tocando banda superior (muy caro)"}; total -= 2
 
         # Volumen
-        if vol_avg and vol_avg > 0:
+        if vol_avg is not None and vol_avg > 0:
             ratio = volumen / vol_avg
             if ratio >= 1.5:
-                puntos["volumen"] = {"ratio": round(ratio,1), "pts": 1, "señal": "volumen alto"}; total += 1
+                puntos["volumen"] = {"hoy": volumen, "promedio": vol_avg, "ratio": round(ratio, 1), "pts": 1, "señal": "volumen alto confirma movimiento"}; total += 1
             elif ratio < 0.6:
-                puntos["volumen"] = {"ratio": round(ratio,1), "pts": -1, "señal": "volumen bajo"}; total -= 1
+                puntos["volumen"] = {"hoy": volumen, "promedio": vol_avg, "ratio": round(ratio, 1), "pts": -1, "señal": "volumen bajo, movimiento poco confiable"}; total -= 1
             else:
-                puntos["volumen"] = {"ratio": round(ratio,1), "pts": 0, "señal": "volumen normal"}
+                puntos["volumen"] = {"hoy": volumen, "promedio": vol_avg, "ratio": round(ratio, 1), "pts": 0, "señal": "volumen normal"}
+
+        # ATR para stop loss dinámico
+        stop_loss_sugerido  = round(precio - (2 * atr), 2) if atr else None
+        take_profit_sugerido= round(precio + (3 * atr), 2) if atr else None
 
         return {
             "simbolo":             symbol,
@@ -310,22 +247,22 @@ def get_stock_data(symbol: str) -> Optional[dict]:
             "atr":                 round(atr, 2) if atr else None,
             "puntos_indicadores":  puntos,
             "puntos_total":        total,
-            "stop_loss_sugerido":  round(precio - 2*atr, 2) if atr else None,
-            "take_profit_sugerido":round(precio + 3*atr, 2) if atr else None,
+            "stop_loss_sugerido":  stop_loss_sugerido,
+            "take_profit_sugerido":take_profit_sugerido,
         }
 
     except Exception as e:
-        log.error(f"Error datos {symbol}: {e}")
+        log.error(f"Error obteniendo datos de {symbol}: {e}")
         return None
 
-# ─── Noticias ───────────────────────────────────────────────────────────────────
+# ─── Noticias ──────────────────────────────────────────────────────────────────
 def get_news(symbol: str) -> str:
     try:
         company = COMPANY_NAMES.get(symbol, symbol)
         url = (
-            f"https://newsapi.org/v2/everything?q={company}&language=en"
-            f"&sortBy=publishedAt"
-            f"&from={(datetime.now()-timedelta(days=1)).strftime('%Y-%m-%d')}"
+            f"https://newsapi.org/v2/everything"
+            f"?q={company}&language=en&sortBy=publishedAt"
+            f"&from={(datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')}"
             f"&pageSize=5&apiKey={NEWS_API_KEY}"
         )
         resp = requests.get(url, timeout=10)
@@ -337,18 +274,18 @@ def get_news(symbol: str) -> str:
         log.error(f"Error noticias {symbol}: {e}")
         return "No se pudieron obtener noticias."
 
-# ─── Portafolio ─────────────────────────────────────────────────────────────────
+# ─── Info portafolio ───────────────────────────────────────────────────────────
 def get_portfolio_info() -> dict:
     account   = trading_client.get_account()
     positions = trading_client.get_all_positions()
     return {
-        "valor_total":       float(account.portfolio_value),
-        "cash":              float(account.cash),
-        "posiciones":        len(positions),
-        "simbolos_abiertos": [p.symbol for p in positions]
+        "valor_total":        float(account.portfolio_value),
+        "cash":               float(account.cash),
+        "posiciones":         len(positions),
+        "simbolos_abiertos":  [p.symbol for p in positions]
     }
 
-# ─── Análisis con Groq ──────────────────────────────────────────────────────────
+# ─── Análisis con Groq ─────────────────────────────────────────────────────────
 def analyze_with_groq(data: dict, portfolio: dict, noticias: str) -> Optional[dict]:
     prompt = f"""
 Portafolio:
@@ -356,18 +293,23 @@ Portafolio:
 - Cash disponible: ${portfolio['cash']:,.2f}
 - Posiciones abiertas ({portfolio['posiciones']}): {portfolio['simbolos_abiertos']}
 
-Análisis técnico de {data['simbolo']} — Precio: ${data['precio_actual']} | Cambio hoy: {data['cambio_dia_%']}%
-ATR: {data['atr']} | Puntos técnicos: {data['puntos_total']}/12
-Stop loss sugerido: ${data['stop_loss_sugerido']} | Take profit sugerido: ${data['take_profit_sugerido']}
+Análisis técnico de {data['simbolo']} (precio actual: ${data['precio_actual']}):
+Cambio hoy: {data['cambio_dia_%']}%
+ATR (volatilidad): {data['atr']}
+Puntos técnicos totales: {data['puntos_total']} / 12 posibles
 
-Detalle indicadores:
+Detalle por indicador:
 {json.dumps(data['puntos_indicadores'], indent=2, ensure_ascii=False)}
 
-Noticias últimas 24h ({COMPANY_NAMES.get(data['simbolo'], data['simbolo'])}):
+Stop loss sugerido por ATR: ${data['stop_loss_sugerido']}
+Take profit sugerido por ATR: ${data['take_profit_sugerido']}
+
+Noticias últimas 24h sobre {COMPANY_NAMES.get(data['simbolo'], data['simbolo'])}:
 {noticias}
 
-Dame tu decisión en JSON.
+Basándote en el puntaje técnico y las noticias, dame tu decisión en JSON.
 """
+
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -378,7 +320,7 @@ Dame tu decisión en JSON.
             max_tokens=500
         )
         raw    = response.choices[0].message.content.strip()
-        raw    = raw.replace("```json","").replace("```","").strip()
+        raw    = raw.replace("```json", "").replace("```", "").strip()
         result = json.loads(raw)
         result["market_data"] = data
         return result
@@ -386,7 +328,7 @@ Dame tu decisión en JSON.
         log.error(f"Error Groq {data['simbolo']}: {e}")
         return None
 
-# ─── Ejecutar orden ─────────────────────────────────────────────────────────────
+# ─── Ejecutar orden ────────────────────────────────────────────────────────────
 def execute_order(decision: dict, portfolio: dict) -> Optional[str]:
     symbol    = decision["simbolo"]
     accion    = decision["accion"]
@@ -404,10 +346,12 @@ def execute_order(decision: dict, portfolio: dict) -> Optional[str]:
             if symbol in recently_traded:
                 if (datetime.now() - recently_traded[symbol]).seconds < 1800:
                     return None
+
             monto    = portfolio["valor_total"] * pct
             cantidad = int(min(monto, portfolio["cash"]) / precio)
             if cantidad < 1:
                 return None
+
             order = trading_client.submit_order(MarketOrderRequest(
                 symbol=symbol, qty=cantidad,
                 side=OrderSide.BUY, time_in_force=TimeInForce.DAY
@@ -433,7 +377,7 @@ def execute_order(decision: dict, portfolio: dict) -> Optional[str]:
 
     return None
 
-# ─── Notificación Telegram ───────────────────────────────────────────────────────
+# ─── Notificación Telegram ─────────────────────────────────────────────────────
 async def notify_telegram(decision: dict, resultado: str):
     md     = decision["market_data"]
     partes = resultado.split("|")
@@ -446,25 +390,30 @@ async def notify_telegram(decision: dict, resultado: str):
         return
 
     tipo, cantidad, precio, pct, orden_id = partes
-    emoji = "🟢" if tipo == "compra" else "🔴"
-    stars = "⭐" * decision["confianza"]
+    emoji  = "🟢" if tipo == "compra" else "🔴"
+    stars  = "⭐" * decision["confianza"]
+    puntos = md.get("puntos_total", "?")
 
+    # Detalle de cada indicador
     detalle = ""
     for ind, info in md.get("puntos_indicadores", {}).items():
-        pts   = info.get("pts", 0)
-        señal = info.get("señal", "")
-        signo = "+" if pts > 0 else ""
+        pts    = info.get("pts", 0)
+        señal  = info.get("señal", "")
+        signo  = "+" if pts > 0 else ""
         detalle += f"  • {ind.upper()}: `{signo}{pts}` — _{señal}_\n"
 
     texto = (
-        f"{emoji} *{tipo.upper()} ejecutada: {decision['simbolo']}*\n\n"
-        f"💰 Precio: `${precio}` | Monto: `{pct}% del portafolio`\n"
-        f"📦 Cantidad: `{cantidad} acciones`\n\n"
-        f"📊 *Indicadores ({md.get('puntos_total','?')} pts):*\n{detalle}\n"
-        f"🛑 Stop Loss: `${decision.get('stop_loss','N/A')}`\n"
-        f"🎯 Take Profit: `${decision.get('take_profit','N/A')}`\n\n"
-        f"🧠 _{decision.get('razon_tecnica','')}_\n"
-        f"📰 _{decision.get('razon_noticias','')}_\n\n"
+        f"{emoji} *{tipo.upper()} ejecutada automáticamente*\n\n"
+        f"*{decision['simbolo']}* — `${precio}`\n\n"
+        f"📊 *Indicadores ({puntos} pts totales):*\n"
+        f"{detalle}\n"
+        f"📰 *Noticias:* _{decision.get('razon_noticias', 'Sin noticias relevantes')}_\n\n"
+        f"💼 *Operación:*\n"
+        f"  • Cantidad: `{cantidad} acciones`\n"
+        f"  • Monto: `{pct}% del portafolio`\n"
+        f"  • Stop Loss: `${decision.get('stop_loss', 'N/A')}`\n"
+        f"  • Take Profit: `${decision.get('take_profit', 'N/A')}`\n\n"
+        f"🧠 _{decision.get('razon_tecnica', '')}_\n\n"
         f"💪 Confianza: {stars} `{decision['confianza']}/10`"
     )
 
@@ -474,9 +423,9 @@ async def notify_telegram(decision: dict, resultado: str):
         parse_mode="Markdown"
     )
 
-# ─── Loop principal ──────────────────────────────────────────────────────────────
+# ─── Loop principal ────────────────────────────────────────────────────────────
 async def analysis_loop():
-    log.info(f"🚀 Bot v4 iniciado — {len(WATCHLIST)} acciones en watchlist")
+    log.info("🚀 Bot v3 iniciado — MACD + Bollinger + ATR activos")
 
     while True:
         now  = datetime.now()
@@ -484,6 +433,7 @@ async def analysis_loop():
         min_ = now.minute
         dia  = now.weekday()
 
+        # Mercado abierto lunes-viernes 10:30am-5pm Colombia
         mercado_abierto = (
             dia < 5 and
             (hora > 10 or (hora == 10 and min_ >= 30)) and
@@ -491,7 +441,7 @@ async def analysis_loop():
         )
 
         if mercado_abierto:
-            log.info(f"🔍 Ciclo de análisis ({now.strftime('%H:%M')}) — {len(WATCHLIST)} acciones")
+            log.info(f"🔍 Analizando mercado ({now.strftime('%H:%M')})...")
             portfolio = get_portfolio_info()
 
             for symbol in WATCHLIST:
@@ -501,9 +451,11 @@ async def analysis_loop():
                         continue
 
                     pts = data["puntos_total"]
-                    log.info(f"  {symbol}: {pts} pts")
+                    log.info(f"  {symbol}: {pts} pts técnicos")
 
+                    # Si los puntos son muy bajos, ni consultamos a Groq
                     if pts < 2:
+                        log.info(f"  ⏭️  {symbol}: puntos insuficientes, omitiendo")
                         continue
 
                     noticias = get_news(symbol)
@@ -519,10 +471,12 @@ async def analysis_loop():
                         resultado = execute_order(decision, portfolio)
                         if resultado and not resultado.startswith("error"):
                             await notify_telegram(decision, resultado)
-                            log.info(f"  ✅ {symbol} ejecutado")
+                            log.info(f"  ✅ Ejecutado y notificado: {symbol}")
+                    else:
+                        log.info(f"  ⏭️  {symbol}: confianza {confianza}/10, no opera")
 
                 except Exception as e:
-                    log.error(f"Error {symbol}: {e}")
+                    log.error(f"Error procesando {symbol}: {e}")
 
                 await asyncio.sleep(3)
 
