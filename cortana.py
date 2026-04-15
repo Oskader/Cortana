@@ -493,7 +493,7 @@ async def analysis_loop():
                 await asyncio.sleep(3)
 
         else:
-            log.info(f"  Mercado cerrado ({now.strftime('%H:%M')}). Revisando en 5 min...")
+            log.info(f"  Mercado cerrado ({now.strftime('%H:%M')} ET). Revisando en 5 min...")
 
         await asyncio.sleep(5 * 60)
 
