@@ -14,6 +14,9 @@ class TechnicalAnalysis:
             logger.warning("DataFrame insuficiente para calcular indicadores")
             return df
 
+        # Asegurar que las columnas sean minúsculas para pandas-ta
+        df.columns = [c.lower() for c in df.columns]
+
         # Tendencia
         df["EMA_9"] = ta.ema(df["close"], length=9)
         df["EMA_21"] = ta.ema(df["close"], length=21)

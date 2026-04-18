@@ -10,10 +10,9 @@ from ..market.data_feed import AlpacaDataStream
 from ..telegram.bot import TelegramUI
 from ..market.indicators import TechnicalAnalysis
 import pandas as pd
-from datetime import datetime
-
 from ..market.screener import Screener
 from ..utils.db import TradeJournal
+from alpaca.trading.enums import OrderSide
 
 class TradingEngine:
     def __init__(self):
@@ -31,7 +30,8 @@ class TradingEngine:
         """Mantiene el estado global actualizado (Account + Positions)"""
         while True:
             try:
-                acc = self.alpaca.get_account_info()
+                # Usar to_thread para no bloquear el event loop con llamadas síncronas
+                acc = await asyncio.to_thread(self.alpaca.get_account_info)
                 await bot_state.update_account(
                     balance=float(acc.cash),
                     equity=float(acc.portfolio_value),
@@ -39,7 +39,7 @@ class TradingEngine:
                 )
                 
                 # Sincronizar posiciones
-                alp_positions = self.alpaca.get_positions()
+                alp_positions = await asyncio.to_thread(self.alpaca.get_positions)
                 pos_list = []
                 for p in alp_positions:
                     pos_list.append(PositionState(
@@ -65,7 +65,7 @@ class TradingEngine:
                 continue
                 
             # 0. Detectar Régimen de Mercado
-            regime = self.screener.get_market_regime()
+            regime = await asyncio.to_thread(self.screener.get_market_regime)
             await bot_state.set_market_regime(regime)
             logger.info(f"Régimen de mercado detectado: {regime}")
 
@@ -74,8 +74,8 @@ class TradingEngine:
             for symbol in settings.WATCHLIST_SYMBOLS:
                 try:
                     # 1. Obtener datos históricos
-                    df = self.alpaca.get_historical_bars(symbol, "1Hour", limit=100)
-                    if df.empty: continue
+                    df = await asyncio.to_thread(self.alpaca.get_historical_bars, symbol, "1Hour", 100)
+                    if df is None or df.empty: continue
                     
                     # 2. Calcular indicadores
                     df = self.ta.calculate_indicators(df)
@@ -126,7 +126,7 @@ class TradingEngine:
             if await self.risk.validate_trade(decision):
                 # 5. Ejecución
                 try:
-                    order = self.alpaca.submit_order(symbol, qty, "buy")
+                    order = await asyncio.to_thread(self.alpaca.submit_order, symbol, qty, OrderSide.BUY)
                     logger.success(f"ORDEN EJECUTADA: BUY {qty} {symbol}")
                     
                     # 6. Notificación

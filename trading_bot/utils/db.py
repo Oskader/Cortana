@@ -8,7 +8,7 @@ Base = declarative_base()
 
 class Trade(Base):
     __tablename__ = 'trades'
-    id = Column(Integer, PRIMARY KEY=True)
+    id = Column(Integer, primary_key=True)
     ticker = Column(String)
     side = Column(String)
     qty = Column(Float)
