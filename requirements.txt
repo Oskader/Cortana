@@ -1,7 +1,27 @@
-groq
-pandas
-ta
-alpaca-py
-python-telegram-bot
-requests
+# Core dependencies
+asyncio
 pytz
+httpx
+loguru
+pydantic-settings
+pydantic
+
+# Trading & Finance
+alpaca-py>=0.30.0
+pandas
+pandas-ta
+yfinance
+SQLAlchemy
+
+# AI
+groq
+
+# Interface
+python-telegram-bot>=20.0
+apscheduler
+
+# Utils
+# prometheus-client  # Optional: Uncomment if monitoring is needed
+matplotlib
+numpy
+tenacity

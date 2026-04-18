@@ -1,1 +1,12 @@
 .env
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+env/
+venv/
+ENV/
+*.db
+logs/
+.DS_Store

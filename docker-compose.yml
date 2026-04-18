@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    volumes:
+      - .:/app
+      - trading_data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  trading_data:
