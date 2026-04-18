@@ -17,16 +17,14 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: int
     ALLOWED_CHAT_IDS: List[int] = Field(default_factory=list)
 
-    @field_validator("ALLOWED_CHAT_IDS", mode="before")
+    @field_validator("ALLOWED_CHAT_IDS", "WATCHLIST_SYMBOLS", mode="before")
     @classmethod
-    def parse_chat_ids(cls, v):
+    def parse_lists(cls, v):
         if isinstance(v, str):
             try:
-                # Intentar parsear como JSON por si viene "[123, 456]"
                 if v.startswith("["):
                     return json.loads(v)
-                # Si no, parsear como CSV
-                return [int(x.strip()) for x in v.split(",") if x.strip()]
+                return [x.strip() for x in v.split(",") if x.strip()]
             except:
                 return []
         if isinstance(v, int):
