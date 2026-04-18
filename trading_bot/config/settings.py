@@ -1,7 +1,7 @@
-import os
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
+import json
 
 class Settings(BaseSettings):
     # API Keys
@@ -16,6 +16,22 @@ class Settings(BaseSettings):
     TELEGRAM_TOKEN: str
     TELEGRAM_CHAT_ID: int
     ALLOWED_CHAT_IDS: List[int] = Field(default_factory=list)
+
+    @field_validator("ALLOWED_CHAT_IDS", mode="before")
+    @classmethod
+    def parse_chat_ids(cls, v):
+        if isinstance(v, str):
+            try:
+                # Intentar parsear como JSON por si viene "[123, 456]"
+                if v.startswith("["):
+                    return json.loads(v)
+                # Si no, parsear como CSV
+                return [int(x.strip()) for x in v.split(",") if x.strip()]
+            except:
+                return []
+        if isinstance(v, int):
+            return [v]
+        return v
     
     # Trading Parameters
     TRADING_MODE: str = "paper"  # "paper" | "live"
