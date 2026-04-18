@@ -13,6 +13,7 @@ import pandas as pd
 from ..market.screener import Screener
 from ..utils.db import TradeJournal
 from alpaca.trading.enums import OrderSide
+from alpaca.data.timeframe import TimeFrame
 
 class TradingEngine:
     def __init__(self):
@@ -74,7 +75,7 @@ class TradingEngine:
             for symbol in settings.WATCHLIST_SYMBOLS:
                 try:
                     # 1. Obtener datos históricos
-                    df = await asyncio.to_thread(self.alpaca.get_historical_bars, symbol, "1Hour", 100)
+                    df = await asyncio.to_thread(self.alpaca.get_historical_bars, symbol, TimeFrame.Hour, 100)
                     if df is None or df.empty: continue
                     
                     # 2. Calcular indicadores
