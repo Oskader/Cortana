@@ -23,17 +23,17 @@ class TelegramUI:
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_chat.id not in settings.ALLOWED_CHAT_IDS:
             return
-        await update.message.reply_text("🤖 Cortana Bot v5 listo. Usa /help para ver comandos.")
+        await update.message.reply_text("👋 Hola, soy Cortana. Tus sistemas de trading están bajo mi supervisión. Usa /status para ver mi diagnóstico actual.")
 
     async def status_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_chat.id not in settings.ALLOWED_CHAT_IDS:
             return
             
         status_msg = (
-            f"<b>ESTADO DEL BOT</b>\n"
+            f"<b>DIAGNÓSTICO DE CORTANA</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"Modo: <code>{settings.TRADING_MODE.upper()}</code>\n"
-            f"Funcionando: {'✅ SI' if bot_state.is_running else '🛑 NO'}\n"
+            f"Entorno: <code>{settings.TRADING_MODE.upper()}</code>\n"
+            f"Estado: {'❇️ OPERATIVO' if bot_state.is_running else '🛑 DETENIDO'}\n"
             f"Equity: <code>${bot_state.equity:,.2f}</code>\n"
             f"P&L Día: <code>{bot_state.daily_pnl_pct:+.2%}</code>\n"
             f"Regimen: <code>{bot_state.market_regime}</code>\n"

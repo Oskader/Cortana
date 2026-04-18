@@ -148,5 +148,5 @@ class TradingEngine:
             # self.stream.run() # WebSocket habilitado después de validar el core
         ]
         
-        await self.tg.send_alert("🚀 <b>Cortana Bot v5 Online</b>\nModo: " + settings.TRADING_MODE.upper())
+        await self.tg.send_alert("✨ <b>Cortana v5 ha iniciado sesión</b>\nProtocolos activos en modo " + settings.TRADING_MODE.upper())
         await asyncio.gather(*tasks)
