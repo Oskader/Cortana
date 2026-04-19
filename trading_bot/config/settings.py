@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     WATCHLIST_SYMBOLS: Any = [
         "AAPL", "MSFT", "GOOGL", "NVDA", "META",
         "AMZN", "TSLA", "NFLX", "AMD", "COIN",
+        "PLTR", "ARM", "MSTR", "SMCI", "QQQ",
+        "SPY", "BABA", "PYPL", "SQ", "V"
     ]
 
     # ═══ MARKET HOURS (ET) ═══
