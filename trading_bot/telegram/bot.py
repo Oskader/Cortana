@@ -67,7 +67,10 @@ class TelegramUI:
 
     def _is_authorized(self, chat_id: int) -> bool:
         """Check if a chat ID is in the allowed whitelist."""
-        return chat_id in settings.ALLOWED_CHAT_IDS
+        authorized = chat_id in settings.ALLOWED_CHAT_IDS or chat_id == settings.TELEGRAM_CHAT_ID
+        if not authorized:
+            logger.warning(f"Unauthorized access attempt from chat_id: {chat_id}")
+        return authorized
 
     # ═══════════════════════════════════════
     # COMMAND HANDLERS
@@ -79,10 +82,23 @@ class TelegramUI:
         """Handle /start — Welcome message."""
         if not self._is_authorized(update.effective_chat.id):
             return
+        
+        commands_list = (
+            "<b>Comandos Disponibles:</b>\n"
+            "📊 /status — Diagnóstico del bot\n"
+            "💼 /portfolio — Ver posiciones\n"
+            "📈 /trades — Historial reciente\n"
+            "🛡️ /risk — Métricas de performance\n"
+            "📅 /report — Reporte diario manual\n"
+            "⏸️ /pause — Detener trading\n"
+            "▶️ /resume — Reanudar trading\n"
+            "❓ /help — Este menú"
+        )
+        
         msg = (
             "👋 <b>Hola, soy Cortana.</b>\n\n"
-            "Tus sistemas de trading están bajo mi supervisión.\n"
-            "Usa /help para ver los comandos disponibles."
+            "Tus sistemas de trading están bajo mi supervisión.\n\n"
+            f"{commands_list}"
         )
         await update.message.reply_html(msg)
 

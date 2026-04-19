@@ -104,11 +104,15 @@ class TradingEngine:
 
         # Send startup notification
         mode = settings.TRADING_MODE.upper()
+        commands_summary = (
+            "📊 /status | 💼 /portfolio | 📈 /trades\n"
+            "🛡️ /risk   | 📅 /report    | ❓ /help"
+        )
         await self.tg.send_alert(
             f"✨ <b>Cortana v5 ha iniciado sesión</b>\n"
             f"Protocolos activos en modo <code>{mode}</code>\n"
-            f"Watchlist: {len(settings.WATCHLIST_SYMBOLS)} activos\n"
-            f"WebSocket: ✅ Activo"
+            f"Watchlist: {len(settings.WATCHLIST_SYMBOLS)} activos\n\n"
+            f"{commands_summary}"
         )
 
         # Run main loops
