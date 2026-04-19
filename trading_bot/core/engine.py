@@ -77,6 +77,8 @@ class TradingEngine:
     # LIFECYCLE
     # ═══════════════════════════════════════
 
+    async def run(self) -> None:
+        """Start all engine components and background loops."""
         logger.info("🚀 Starting Cortana Trading Engine...")
         
         # Verify Connectivity (Alpaca)
