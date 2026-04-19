@@ -12,7 +12,7 @@ pydantic-settings
 # Trading & Finance
 alpaca-py
 pandas
-pandas-ta-classic
+pandas-ta
 yfinance
 SQLAlchemy
 
