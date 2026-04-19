@@ -109,14 +109,16 @@ class TelegramUI:
         if not self._is_authorized(update.effective_chat.id):
             return
 
-        status_emoji = "❇️ OPERATIVO" if bot_state.is_running else "🛑 DETENIDO"
+        system_status = "❇️ OPERATIVO" if bot_state.is_running else "🛑 PAUSADO"
+        market_status = "✅ ABIERTO (Activo)" if bot_state.is_market_open else "💤 CERRADO (Inactivo)"
         pnl_emoji = "🟢" if bot_state.daily_pnl_pct >= 0 else "🔴"
 
         msg = (
             f"<b>DIAGNÓSTICO DE CORTANA</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"Entorno: <code>{settings.TRADING_MODE.upper()}</code>\n"
-            f"Estado: {status_emoji}\n"
+            f"Sistema: {system_status}\n"
+            f"Mercado: {market_status}\n"
             f"Equity: <code>${bot_state.equity:,.2f}</code>\n"
             f"Buying Power: <code>${bot_state.buying_power:,.2f}</code>\n"
             f"{pnl_emoji} P&L Día: <code>{bot_state.daily_pnl_pct:+.2%}"
@@ -403,17 +405,9 @@ class TelegramUI:
 
     def start_daily_report_scheduler(self) -> None:
         """
-        Start APScheduler to send daily report at market close (4:05 PM ET).
+        Legacy: Daily report is now triggered by market close event in engine.
         """
-        self._scheduler = AsyncIOScheduler()
-        self._scheduler.add_job(
-            self.send_daily_report,
-            CronTrigger(hour=16, minute=5, timezone="America/New_York"),
-            id="daily_report",
-            name="Daily Trading Report",
-        )
-        self._scheduler.start()
-        logger.info("Daily report scheduler started (4:05 PM ET)")
+        pass
 
     # ═══════════════════════════════════════
     # LIFECYCLE

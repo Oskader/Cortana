@@ -15,9 +15,11 @@ Arquitectura:
 
 import asyncio
 import os
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
+import pytz
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.enums import OrderSide
 from loguru import logger
@@ -169,7 +171,42 @@ class TradingEngine:
         """Fetch market clock and update global state."""
         clock = await asyncio.to_thread(self.alpaca.get_clock)
         if clock:
+            was_open = bot_state.is_market_open
             bot_state.is_market_open = clock.is_open
+
+            # Detect transitions
+            if not was_open and clock.is_open:
+                await self._on_market_open()
+            elif was_open and not clock.is_open:
+                await self._on_market_close()
+
+    async def _on_market_open(self) -> None:
+        """Handle market open event."""
+        col_time = self._get_colombia_time_str()
+        logger.info(f"Market Opened. Colombia Time: {col_time}")
+        await self.tg.send_alert(
+            f"🔔 <b>Mercado Abierto</b>\n"
+            f"Hora en Colombia: <code>{col_time}</code>\n"
+            f"Cortana iniciando protocolos de trading..."
+        )
+
+    async def _on_market_close(self) -> None:
+        """Handle market close event."""
+        col_time = self._get_colombia_time_str()
+        logger.info(f"Market Closed. Colombia Time: {col_time}")
+        await self.tg.send_alert(
+            f"🔔 <b>Mercado Cerrado</b>\n"
+            f"Hora en Colombia: <code>{col_time}</code>\n"
+            f"Generando resumen del día..."
+        )
+        await self.tg.send_daily_report()
+
+    def _get_colombia_time_str(self) -> str:
+        """Get current time in Colombia formatted as string."""
+        tz = pytz.timezone("America/Bogota")
+        now = datetime.now(tz)
+        return now.strftime("%H:%M:%S")
+
 
     async def _sync_account(self) -> None:
         """Fetch account info from Alpaca and update global state."""
@@ -215,7 +252,7 @@ class TradingEngine:
     async def _scan_market_loop(self) -> None:
         """Scan the watchlist periodically for trading opportunities."""
         while True:
-            if not bot_state.is_running:
+            if not bot_state.is_running or not bot_state.is_market_open:
                 await asyncio.sleep(C.STATE_UPDATE_INTERVAL_SECONDS)
                 continue
 
