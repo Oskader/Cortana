@@ -1,33 +1,47 @@
+"""
+Cortana Trading Bot — Entry Point.
+
+Institucional-grade algorithmic trading bot powered by:
+    - Alpaca Markets (execution + market data)
+    - Groq AI (analysis with Reflection Pattern)
+    - Telegram (interface + notifications)
+"""
+
 import asyncio
 import sys
+
 from loguru import logger
+
 from trading_bot.config.logging_config import setup_logging
 from trading_bot.core.engine import TradingEngine
 
-async def main():
-    # 1. Configurar Logging
+
+async def main() -> None:
+    """Initialize and run the trading engine."""
     setup_logging()
-    
-    logger.info("Iniciando aplicación Cortana Bot...")
-    
+
+    logger.info("═══ CORTANA BOT — INICIANDO ═══")
+
+    engine = TradingEngine()
+
     try:
-        # 2. Inicializar el motor
-        engine = TradingEngine()
-        
-        # 3. Correr el bot
         await engine.run()
-        
     except KeyboardInterrupt:
-        logger.warning("Detención manual detectada...")
+        logger.warning("Manual shutdown detected (Ctrl+C)")
     except Exception as e:
-        logger.critical(f"ERROR CRÍTICO EN MAIN: {e}")
+        logger.critical(f"FATAL ERROR: {type(e).__name__}: {e}")
         sys.exit(1)
     finally:
-        logger.info("Bot apagado correctamente.")
+        try:
+            await engine.shutdown()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        logger.info("═══ CORTANA BOT — APAGADO ═══")
+
 
 if __name__ == "__main__":
     try:
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(main())
     except KeyboardInterrupt:

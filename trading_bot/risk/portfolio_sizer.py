@@ -1,52 +1,173 @@
+"""
+Position sizing con Half-Kelly Criterion usando estadísticas reales.
+
+Ajusta el tamaño de posición según:
+    - Win rate y average win/loss del trade journal (cuando hay suficiente data)
+    - Régimen de mercado (50% del tamaño en alta volatilidad)
+    - Cap máximo del 5% del portfolio por posición
+"""
+
 from loguru import logger
-from ..core.state import bot_state
+
+from ..config import constants as C
 from ..config.settings import settings
+from ..core.state import bot_state
+
 
 class PortfolioSizer:
-    def __init__(self, win_rate: float = 0.5, avg_win: float = 2.0, avg_loss: float = 1.0):
+    """
+    Calcula el tamaño de posición óptimo usando Half-Kelly Criterion.
+
+    Usa estadísticas reales del TradeJournal cuando hay suficiente
+    historial (>= 20 trades), con fallback a valores conservadores.
+    """
+
+    def __init__(
+        self,
+        win_rate: float = 0.50,
+        avg_win: float = 2.0,
+        avg_loss: float = 1.0,
+    ) -> None:
         """
-        Inicia con valores por defecto hasta que las estadísticas reales estén disponibles.
+        Initialize with default statistics.
+
+        Args:
+            win_rate: Probability of winning (0.0 - 1.0).
+            avg_win: Average dollar gain on winning trades.
+            avg_loss: Average dollar loss on losing trades.
         """
         self.win_rate = win_rate
         self.avg_win = avg_win
         self.avg_loss = avg_loss
 
-    def calculate_kelly_size(self, equity: float) -> float:
+    def update_stats_from_journal(self, stats: dict) -> None:
         """
-        Calcula el tamaño de la posición usando Half-Kelly.
-        formula: f* = (p*b - q) / b
-        f: fracción de kelly
-        p: probabilidad de ganar (win_rate)
-        q: probabilidad de perder (1 - p)
-        b: ratio ganar/perder (avg_win / avg_loss)
+        Update Kelly statistics with real data from the trade journal.
+
+        Only updates if there are enough trades for statistical significance.
+
+        Args:
+            stats: Dict with 'win_rate', 'avg_win', 'avg_loss', 'trades'.
         """
-        if self.avg_loss == 0: return equity * 0.01
-        
-        b = self.avg_win / self.avg_loss
+        if stats.get("trades", 0) >= C.KELLY_MIN_SAMPLE_SIZE:
+            self.win_rate = stats.get("win_rate", self.win_rate)
+            self.avg_win = stats.get("avg_win", self.avg_win)
+            self.avg_loss = max(stats.get("avg_loss", self.avg_loss), 0.01)
+            logger.info(
+                f"Kelly stats updated from journal: "
+                f"WR={self.win_rate:.2%}, "
+                f"AvgW=${self.avg_win:.2f}, "
+                f"AvgL=${self.avg_loss:.2f} "
+                f"(from {stats.get('trades')} trades)"
+            )
+        else:
+            logger.debug(
+                f"Not enough trades for real Kelly stats "
+                f"({stats.get('trades', 0)} < {C.KELLY_MIN_SAMPLE_SIZE}), "
+                f"using defaults"
+            )
+
+    def calculate_kelly_fraction(self) -> float:
+        """
+        Calculate the Half-Kelly fraction.
+
+        Formula: f* = (p * b - q) / b
+        Where: p=win_rate, q=1-p, b=avg_win/avg_loss
+
+        Returns:
+            Fraction of portfolio to risk (clamped to safe bounds).
+        """
+        if self.avg_loss <= 0:
+            return C.KELLY_MIN_FRACTION
+
+        b = self.avg_win / self.avg_loss  # Win/Loss ratio
         p = self.win_rate
-        q = 1 - p
-        
-        kelly_f = (p * b - q) / b if b != 0 else 0
-        
-        # Half-Kelly (más conservador)
-        half_kelly = kelly_f / 2
-        
-        # Aplicar límites de seguridad
-        safe_size = max(0.01, min(half_kelly, settings.MAX_POSITION_SIZE_PCT))
-        
-        position_value = equity * safe_size
-        logger.info(f"Kelly Calc: WR={p:.2%}, B={b:.2f} -> Half-Kelly Share: {half_kelly:.2%}. Safe Size: {safe_size:.2%}")
-        
+        q = 1.0 - p
+
+        full_kelly = (p * b - q) / b if b > 0 else 0
+        half_kelly = full_kelly / 2.0
+
+        # Clamp to safe bounds
+        safe_fraction = max(
+            C.KELLY_MIN_FRACTION,
+            min(half_kelly, settings.MAX_POSITION_SIZE_PCT),
+        )
+        return safe_fraction
+
+    def calculate_position_value(
+        self,
+        market_regime: str,
+    ) -> float:
+        """
+        Calculate the position value in USD.
+
+        Args:
+            market_regime: Current market regime for size adjustment.
+
+        Returns:
+            Dollar amount to invest, adjusted by regime.
+        """
+        equity = bot_state.equity if bot_state.equity > 0 else C.KELLY_FALLBACK_EQUITY
+
+        kelly_fraction = self.calculate_kelly_fraction()
+        position_value = equity * kelly_fraction
+
+        # Reduce size in high volatility
+        if market_regime == C.REGIME_HIGH_VOLATILITY:
+            position_value *= C.HIGH_VOL_SIZE_REDUCTION
+            logger.info(
+                f"High vol regime: position reduced by "
+                f"{(1 - C.HIGH_VOL_SIZE_REDUCTION):.0%}"
+            )
+
+        # Absolute cap
+        max_position = equity * settings.MAX_POSITION_SIZE_PCT
+        position_value = min(position_value, max_position)
+
+        logger.info(
+            f"Position sizing: Kelly={kelly_fraction:.2%}, "
+            f"Regime={market_regime}, "
+            f"Size=${position_value:,.2f} "
+            f"({position_value/equity:.2%} of ${equity:,.2f} equity)"
+        )
         return position_value
 
-    def get_quantity(self, ticker: str, price: float) -> int:
-        """Determina la cantidad exacta de acciones a comprar"""
-        equity = bot_state.equity if bot_state.equity > 0 else 1000 # fallback
-        monto_a_invertir = self.calculate_kelly_size(equity)
-        
-        if price <= 0: return 0
-        
-        qty = int(monto_a_invertir / price)
-        logger.info(f"Sizing for {ticker}: Equity=${equity:,.2f}, Target=${monto_a_invertir:,.2f} -> Qty={qty}")
-        
+    def get_quantity(
+        self,
+        ticker: str,
+        entry_price: float,
+        market_regime: str,
+    ) -> int:
+        """
+        Determine the exact number of shares to buy.
+
+        Args:
+            ticker: Stock ticker symbol.
+            entry_price: Estimated entry price per share.
+            market_regime: Current market regime.
+
+        Returns:
+            Integer number of shares (0 if calculation fails).
+        """
+        if entry_price <= 0:
+            logger.error(f"Invalid entry price for {ticker}: {entry_price}")
+            return 0
+
+        position_value = self.calculate_position_value(
+            market_regime=market_regime,
+        )
+
+        qty = int(position_value / entry_price)
+
+        if qty <= 0:
+            logger.warning(
+                f"Qty=0 for {ticker} @ ${entry_price:.2f}. "
+                f"Position value ${position_value:.2f} too small."
+            )
+            return 0
+
+        logger.info(
+            f"Sizing {ticker}: ${position_value:,.2f} / "
+            f"${entry_price:.2f} = {qty} shares"
+        )
         return qty

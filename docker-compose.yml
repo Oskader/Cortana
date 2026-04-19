@@ -1,14 +1,22 @@
 version: '3.8'
 
 services:
-  bot:
+  cortana-bot:
     build: .
-    volumes:
-      - .:/app
-      - trading_data:/app/data
     env_file:
       - .env
+    volumes:
+      - bot_data:/app/data
+      - bot_logs:/app/logs
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
 
 volumes:
-  trading_data:
+  bot_data:
+    name: cortana_trading_data
+  bot_logs:
+    name: cortana_trading_logs

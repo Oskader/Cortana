@@ -1,12 +1,42 @@
+# ═══════════════════════════════════════
+# CORTANA BOT — .gitignore
+# ═══════════════════════════════════════
+
+# Environment
 .env
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
 .venv/
 env/
 venv/
 ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Data & Logs
 *.db
+data/
 logs/
+
+# OS
 .DS_Store
+Thumbs.db
