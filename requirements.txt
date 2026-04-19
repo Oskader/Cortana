@@ -25,7 +25,7 @@ APScheduler==3.10.4
 
 # Utils
 matplotlib==3.9.0
-numpy==1.26.4
+numpy>=2.0.0
 tenacity==8.3.0
 
 # Testing
