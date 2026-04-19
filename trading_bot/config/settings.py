@@ -71,7 +71,10 @@ class Settings(BaseSettings):
             try:
                 if v.startswith("["):
                     return json.loads(v)
-                return [x.strip() for x in v.split(",") if x.strip()]
+                # Split by comma first, then by space if no commas found
+                if "," in v:
+                    return [x.strip() for x in v.split(",") if x.strip()]
+                return [x.strip() for x in v.split() if x.strip()]
             except (json.JSONDecodeError, ValueError):
                 return []
         if isinstance(v, (int, float)):
