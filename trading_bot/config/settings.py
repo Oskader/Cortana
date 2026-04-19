@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # ═══ TELEGRAM ═══
     TELEGRAM_TOKEN: str
     TELEGRAM_CHAT_ID: int
-    ALLOWED_CHAT_IDS: List[int] = Field(default_factory=list)
+    ALLOWED_CHAT_IDS: Any = Field(default_factory=list)
 
     # ═══ NEWS ═══
     NEWS_API_KEY: str = ""
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     MAX_DAILY_TRADES: int = 3  # PDT-safe limit
 
     # ═══ SCREENER & STRATEGY ═══
-    WATCHLIST_SYMBOLS: List[str] = [
+    WATCHLIST_SYMBOLS: Any = [
         "AAPL", "MSFT", "GOOGL", "NVDA", "META",
         "AMZN", "TSLA", "NFLX", "AMD", "COIN",
     ]
