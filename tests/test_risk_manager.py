@@ -59,18 +59,12 @@ class TestCircuitBreakers:
 
     @pytest.mark.asyncio
     async def test_market_hours_weekend_blocked(self, risk_manager, valid_buy_signal):
-        """Trading should be blocked on weekends."""
-        # Saturday = weekday 5
-        saturday = datetime(2026, 4, 18, 12, 0)  # a Saturday
-        with patch("trading_bot.risk.risk_manager.datetime") as mock_dt:
-            mock_dt.now.return_value = saturday
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            result = risk_manager._check_market_hours()
-            # Note: this test depends on the actual day, so we test the method directly
-            is_valid, reason = result
-            # On weekends, should be False
-            if saturday.weekday() >= 5:
-                assert not is_valid
+        """Trading should be blocked on weekends or when market is closed."""
+        with patch("trading_bot.risk.risk_manager.bot_state") as mock_state:
+            mock_state.is_market_open = False
+            is_valid, reason = risk_manager._check_market_hours()
+            assert not is_valid
+            assert "Market is closed" in reason
 
     @pytest.mark.asyncio
     async def test_insufficient_buying_power_blocked(
@@ -186,8 +180,8 @@ class TestKellyPositionSizing:
         sizer = PortfolioSizer(win_rate=0.60, avg_win=2.0, avg_loss=1.0)
         fraction = sizer.calculate_kelly_fraction()
         # f* = (0.6*2 - 0.4) / 2 = 0.4 → half = 0.2
-        # But capped at MAX_POSITION_SIZE_PCT (0.05)
-        assert fraction <= 0.05  # Should be capped
+        # But capped at MAX_POSITION_SIZE_PCT (0.20 for $10 account)
+        assert fraction <= 0.20  # Should be capped
 
     def test_kelly_caps_at_5_percent(self):
         """Half-Kelly should never exceed 5% of portfolio."""
@@ -195,7 +189,7 @@ class TestKellyPositionSizing:
         # Very favorable stats that would give high Kelly
         sizer = PortfolioSizer(win_rate=0.80, avg_win=3.0, avg_loss=1.0)
         fraction = sizer.calculate_kelly_fraction()
-        assert fraction <= 0.05
+        assert fraction <= 0.20
 
     def test_kelly_minimum_floor(self):
         """Kelly should never go below 1% minimum."""

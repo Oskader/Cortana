@@ -81,51 +81,36 @@ class RiskManager:
         return True, "OK"
 
     def _check_market_hours(self) -> Tuple[bool, str]:
-        """Verify we're within safe trading hours (ET)."""
-        now = datetime.now(self.timezone)
-
-        if now.weekday() >= 5:
-            return False, f"Market closed — weekend (day={now.weekday()})"
-
-        open_time = now.replace(
-            hour=settings.MARKET_OPEN_HOUR,
-            minute=settings.MARKET_OPEN_MINUTE,
-            second=0, microsecond=0,
-        )
-        close_time = now.replace(
-            hour=settings.MARKET_CLOSE_HOUR,
-            minute=settings.MARKET_CLOSE_MINUTE,
-            second=0, microsecond=0,
-        )
-
-        if not (open_time <= now <= close_time):
-            return False, (
-                f"Outside trading hours: {now.strftime('%H:%M')} ET "
-                f"(allowed: {settings.MARKET_OPEN_HOUR}:"
-                f"{settings.MARKET_OPEN_MINUTE:02d}"
-                f"-{settings.MARKET_CLOSE_HOUR}:"
-                f"{settings.MARKET_CLOSE_MINUTE:02d})"
-            )
-
+        """Verify we're within safe trading hours directly via Alpaca's clock check."""
+        if not bot_state.is_market_open:
+            return False, "Market is closed according to Alpaca clock"
         return True, "OK"
 
     def _check_daily_loss_limit(self) -> Tuple[bool, str]:
         """Circuit breaker: halt if daily loss exceeds limit."""
-        if bot_state.daily_pnl_pct <= -settings.MAX_DAILY_LOSS_PCT:
+        max_daily_loss = float(settings.model_dump().get("MAX_DAILY_LOSS_PCT", 0.015))
+        if bot_state.daily_pnl_pct <= -max_daily_loss:
             return False, (
                 f"CIRCUIT BREAKER — Daily loss limit: "
                 f"{bot_state.daily_pnl_pct:.2%} <= "
-                f"-{settings.MAX_DAILY_LOSS_PCT:.2%}"
+                f"-{max_daily_loss:.2%}"
             )
         return True, "OK"
 
     def _check_max_drawdown(self) -> Tuple[bool, str]:
         """Circuit breaker: halt if max drawdown exceeded."""
-        if bot_state.max_drawdown >= C.DRAWDOWN_HARD_LIMIT:
+        pause_dd = abs(float(settings.model_dump().get("DRAWDOWN_PAUSE_PCT", -0.15)))
+        halt_dd = abs(float(settings.model_dump().get("DRAWDOWN_HALT_PCT", -0.25)))
+        
+        if bot_state.max_drawdown >= halt_dd:
             return False, (
-                f"CIRCUIT BREAKER — Max drawdown: "
-                f"{bot_state.max_drawdown:.2%} >= "
-                f"{C.DRAWDOWN_HARD_LIMIT:.2%}"
+                f"CIRCUIT BREAKER CRITICAL — Max drawdown HALT: "
+                f"-{bot_state.max_drawdown:.2%} >= -{halt_dd:.2%}"
+            )
+        if bot_state.max_drawdown >= pause_dd:
+            return False, (
+                f"CIRCUIT BREAKER WARNING — Max drawdown PAUSE: "
+                f"-{bot_state.max_drawdown:.2%} >= -{pause_dd:.2%}"
             )
         return True, "OK"
 
@@ -163,10 +148,10 @@ class RiskManager:
         return True, "OK"
 
     def _check_pdt_rule(self) -> Tuple[bool, str]:
-        """Pattern Day Trader protection: limit daily trades."""
+        """Pattern Day Trader protection: limit day trades over 5 business days."""
         if bot_state.trades_today >= settings.MAX_DAILY_TRADES:
             return False, (
-                f"PDT protection: {bot_state.trades_today} trades today "
+                f"PDT protection: {bot_state.trades_today} day-trades in last 5 days "
                 f"(limit: {settings.MAX_DAILY_TRADES})"
             )
         return True, "OK"

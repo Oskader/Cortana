@@ -132,6 +132,34 @@ class AlpacaClient:
             )
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
+    def submit_notional_order(
+        self,
+        symbol: str,
+        notional: float,
+        side: OrderSide,
+    ) -> Any:
+        """
+        Submit a market order using notional dollar value directly.
+        Required for fractional shares where we cannot specify exact integers.
+        """
+        # Ensure notional is rounded to 2 decimal places to satisfy API
+        notional = round(notional, 2)
+        
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            notional=notional,
+            side=side,
+            time_in_force=TimeInForce.DAY,
+        )
+        logger.info(f"📤 Notional Order: {side.value} ${notional} {symbol}", trade=True)
+        try:
+            return self.trading_client.submit_order(order_data)
+        except Exception as e:
+            raise OrderExecutionError(
+                ticker=symbol, side=side.value, reason=str(e),
+            )
+
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
     def submit_simple_order(
         self,
         symbol: str,
@@ -221,6 +249,15 @@ class AlpacaClient:
         """
         request = StockLatestQuoteRequest(symbol_or_symbols=symbol)
         return self.data_client.get_stock_latest_quote(request)
+
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
+    def get_clock(self) -> Any:
+        """Fetch market clock status from Alpaca API."""
+        try:
+            return self.trading_client.get_clock()
+        except Exception as e:
+            logger.error(f"Error checking market clock: {e}")
+            raise
 
     def get_multi_timeframe_bars(
         self,

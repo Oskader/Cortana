@@ -45,6 +45,7 @@ class TechnicalAnalysis:
         df = TechnicalAnalysis._add_momentum_indicators(df)
         df = TechnicalAnalysis._add_volatility_indicators(df)
         df = TechnicalAnalysis._add_volume_indicators(df)
+        df = TechnicalAnalysis._add_smc_indicators(df)
 
         return df
 
@@ -118,17 +119,34 @@ class TechnicalAnalysis:
         return df
 
     @staticmethod
+    def _add_smc_indicators(df: pd.DataFrame) -> pd.DataFrame:
+        """Add Smart Money Concepts: Fair Value Gaps (FVG) and simple Order Blocks."""
+        # Bullish FVG: Low of candle 3 is higher than High of candle 1
+        # df shifted represents prior candles
+        df["FVG_BULL"] = (df["low"].shift(0) > df["high"].shift(2)) & (df["close"].shift(1) > df["open"].shift(1))
+        # Bearish FVG (for context)
+        df["FVG_BEAR"] = (df["high"].shift(0) < df["low"].shift(2)) & (df["close"].shift(1) < df["open"].shift(1))
+        
+        # Simple Order Block detection (last bearish candle before strong bullish move)
+        # Simplified: Bearish close, followed by 2 strong bullish candles that break above previous high
+        df["OB_BULL"] = (df["close"].shift(2) < df["open"].shift(2)) & \
+                        (df["close"].shift(1) > df["open"].shift(1)) & \
+                        (df["close"].shift(0) > df["high"].shift(2))
+        return df
+
+    @staticmethod
     def get_signal_score(df: pd.DataFrame) -> int:
         """
         Genera un score de confluencia técnica de 0 a 100.
 
         Criteria (all bullish):
             - EMA Stack (9 > 21 > 50 > 200): +20pts
-            - RSI en zona favorable (40-65): +15pts
-            - MACD Bullish Cross: +20pts
-            - Precio sobre VWAP: +15pts
+            - RSI en zona favorable (40-65): +10pts
+            - MACD Bullish Cross: +15pts
+            - Precio sobre VWAP: +10pts
             - Volumen relativo > 1.5x: +10pts
-            - SuperTrend alcista: +20pts
+            - SuperTrend alcista: +15pts
+            - SMC: Bullish FVG or Order Block (ICT): +20pts
 
         Args:
             df: DataFrame con indicadores ya calculados.
@@ -158,10 +176,13 @@ class TechnicalAnalysis:
         # Relative volume above threshold (+10)
         score += TechnicalAnalysis._score_volume(last)
 
-        # SuperTrend bullish (+20)
+        # SuperTrend bullish (+15)
         score += TechnicalAnalysis._score_supertrend(last)
 
-        return score
+        # SMC concepts (+20)
+        score += TechnicalAnalysis._score_smc(last)
+
+        return min(score, 100)
 
     # ═══════════════════════════════════════
     # SCORING HELPERS (NaN-safe)
@@ -230,5 +251,14 @@ class TechnicalAnalysis:
         """Score SuperTrend direction."""
         st_dir = TechnicalAnalysis._safe_get(last, "SUPERT_DIR")
         if st_dir is not None and st_dir == 1:
-            return C.SCORE_SUPERTREND
+            return 15 # Was 20, reduced for SMC
+        return 0
+
+    @staticmethod
+    def _score_smc(last: pd.Series) -> int:
+        """Score based on Smart Money Concepts."""
+        fvg = TechnicalAnalysis._safe_get(last, "FVG_BULL")
+        ob = TechnicalAnalysis._safe_get(last, "OB_BULL")
+        if (fvg is not None and fvg > 0) or (ob is not None and ob > 0):
+            return 20
         return 0

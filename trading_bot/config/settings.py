@@ -35,9 +35,9 @@ class Settings(BaseSettings):
 
     # ═══ TRADING PARAMETERS ═══
     TRADING_MODE: str = "paper"  # "paper" | "live"
-    MAX_DAILY_LOSS_PCT: float = 0.02
-    MAX_POSITION_SIZE_PCT: float = 0.05
-    MAX_OPEN_POSITIONS: int = 5
+    MAX_DAILY_LOSS_PCT: float = 0.05
+    MAX_POSITION_SIZE_PCT: float = 0.20
+    MAX_OPEN_POSITIONS: int = 4
     MAX_DAILY_TRADES: int = 3  # PDT-safe limit
 
     # ═══ SCREENER & STRATEGY ═══

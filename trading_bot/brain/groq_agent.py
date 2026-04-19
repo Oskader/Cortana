@@ -37,6 +37,7 @@ class GroqTradeSignal(BaseModel):
     action: Literal["BUY", "SELL", "HOLD", "CLOSE"]
     ticker: str
     confidence: float = Field(..., ge=0.0, le=1.0)
+    signal_score: float = Field(default=0.0, ge=0.0, le=10.0)
     reasoning: str = Field(..., min_length=10)
     entry_price_target: float = Field(default=0.01, gt=0)
     stop_loss: float = Field(default=0.01, gt=0)
@@ -94,7 +95,8 @@ Responde EXCLUSIVAMENTE en JSON válido:
   "action": "BUY" | "SELL" | "HOLD" | "CLOSE",
   "ticker": "TICKER",
   "confidence": 0.0-1.0,
-  "reasoning": "Resumen de confluencia en 3 oraciones",
+  "signal_score": 0.0-10.0,
+  "reasoning": "Resumen de confluencia en 3 oraciones. Evalúa el peso de SMC (FVG/OB).",
   "entry_price_target": 0.0,
   "stop_loss": 0.0,
   "take_profit": 0.0,
@@ -256,6 +258,7 @@ class GroqAgent:
             "action": "HOLD",
             "ticker": "N/A",
             "confidence": 0.0,
+            "signal_score": 0.0,
             "reasoning": reason,
             "entry_price_target": 0.01,
             "stop_loss": 0.01,
@@ -293,6 +296,15 @@ class GroqAgent:
                 logger.warning(
                     f"Risk/reward {signal.risk_reward_ratio:.2f} < "
                     f"minimum {C.MIN_RISK_REWARD_RATIO}"
+                )
+                return None
+
+            # New Rule: Check AI scoring limit
+            min_score = float(settings.model_dump().get("GROQ_MIN_SCORE", 7.0))
+            if signal.action == "BUY" and signal.signal_score < min_score:
+                logger.warning(
+                    f"Signal score {signal.signal_score:.1f} < "
+                    f"minimum {min_score}"
                 )
                 return None
 
@@ -458,7 +470,7 @@ Posiciones abiertas: {account_info.get('position_count', 0)}
             f"3. Factores que podrían invalidar el setup\n\n"
             f'Responde en JSON: {{"critique": "...", "risk_level": '
             f'"LOW"|"MEDIUM"|"HIGH"|"CRITICAL", "should_proceed": true/false, '
-            f'"adjusted_confidence": 0.0-1.0}}'
+            f'"adjusted_confidence": 0.0-1.0, "adjusted_score": 0.0-10.0}}'
         )
 
         step2_raw = await self._call_groq(

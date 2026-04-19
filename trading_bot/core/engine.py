@@ -77,9 +77,15 @@ class TradingEngine:
     # LIFECYCLE
     # ═══════════════════════════════════════
 
-    async def run(self) -> None:
-        """Start all engine components and background loops."""
         logger.info("🚀 Starting Cortana Trading Engine...")
+        
+        # Verify Connectivity (Alpaca)
+        try:
+            await asyncio.to_thread(self.alpaca.get_account_info)
+            logger.info("✅ Connected to Alpaca Markets")
+        except Exception as e:
+            logger.critical(f"Failed to connect to Alpaca: {e}")
+            raise RuntimeError("API connectivity failure") from e
 
         # Ensure data directory exists
         os.makedirs("data", exist_ok=True)
@@ -124,10 +130,20 @@ class TradingEngine:
     async def shutdown(self) -> None:
         """Gracefully shutdown all components."""
         logger.info("Shutting down Cortana Engine...")
-        await self.stream.stop()
-        await self.tg.stop()
+        
+        try:
+            await self.stream.stop()
+        except Exception as e:
+            logger.error(f"Error stopping WebSocket stream: {e}")
+            
+        try:
+            await self.tg.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Telegram bot: {e}")
+            
         for task in self._tasks:
             task.cancel()
+            
         logger.info("Engine shutdown complete")
 
     # ═══════════════════════════════════════
@@ -135,15 +151,23 @@ class TradingEngine:
     # ═══════════════════════════════════════
 
     async def _update_state_loop(self) -> None:
-        """Sync account info and positions with Alpaca every 60s."""
+        """Sync account info, clock and positions with Alpaca every 60s."""
         while True:
             try:
+                await self._sync_clock()
                 await self._sync_account()
                 await self._sync_positions()
+                await self._sync_pdt_rule()
             except Exception as e:
                 logger.error(f"Error updating state: {e}")
 
             await asyncio.sleep(C.STATE_UPDATE_INTERVAL_SECONDS)
+
+    async def _sync_clock(self) -> None:
+        """Fetch market clock and update global state."""
+        clock = await asyncio.to_thread(self.alpaca.get_clock)
+        if clock:
+            bot_state.is_market_open = clock.is_open
 
     async def _sync_account(self) -> None:
         """Fetch account info from Alpaca and update global state."""
@@ -155,20 +179,32 @@ class TradingEngine:
         )
 
     async def _sync_positions(self) -> None:
-        """Fetch positions from Alpaca and update global state."""
+        """Fetch positions from Alpaca and update global state with Virtual Brackets from DB."""
         alp_positions = await asyncio.to_thread(self.alpaca.get_positions)
-        positions = [
-            PositionState(
-                symbol=p.symbol,
-                qty=float(p.qty),
-                entry_price=float(p.avg_entry_price),
-                current_price=float(p.current_price),
-                unrealized_pnl=float(p.unrealized_pl),
-                unrealized_pnl_pct=float(p.unrealized_plpc),
+        open_trades_db = await asyncio.to_thread(self.journal.get_open_trades)
+        
+        positions = []
+        for p in alp_positions:
+            db_trade = open_trades_db.get(p.symbol, {})
+            positions.append(
+                PositionState(
+                    symbol=p.symbol,
+                    qty=float(p.qty),
+                    entry_price=float(p.avg_entry_price),
+                    current_price=float(p.current_price),
+                    unrealized_pnl=float(p.unrealized_pl),
+                    unrealized_pnl_pct=float(p.unrealized_plpc),
+                    stop_loss=db_trade.get("stop_loss"),
+                    take_profit=db_trade.get("take_profit"),
+                    trade_id=db_trade.get("id"),
+                )
             )
-            for p in alp_positions
-        ]
         await bot_state.update_positions(positions)
+
+    async def _sync_pdt_rule(self) -> None:
+        """Fetch closed round trips in the last 5 days for PDT."""
+        day_trades = await asyncio.to_thread(self.journal.count_day_trades_last_5_days)
+        bot_state.trades_today = day_trades
 
     # ═══════════════════════════════════════
     # MARKET SCANNING LOOP
@@ -290,19 +326,17 @@ class TradingEngine:
             logger.info(f"{symbol}: Action={signal.action}, only BUY supported.")
             return
 
-        # 3. Position Sizing
-        qty = self.sizer.get_quantity(
+        # 3. Position Sizing (Notional)
+        notional_value = self.sizer.get_position_value(
             ticker=symbol,
-            entry_price=signal.entry_price_target,
             market_regime=bot_state.market_regime,
         )
-        if qty <= 0:
-            logger.warning(f"{symbol}: Calculated qty=0. Skipping.")
+        if notional_value <= 0:
+            logger.warning(f"{symbol}: Calculated notional=0. Skipping.")
             return
 
         # 4. Risk Validation (9-point checklist)
-        estimated_cost = qty * signal.entry_price_target
-        is_valid, reason = await self.risk.validate_trade(signal, estimated_cost)
+        is_valid, reason = await self.risk.validate_trade(signal, notional_value)
 
         if not is_valid:
             await self.tg.send_alert(
@@ -311,8 +345,8 @@ class TradingEngine:
             )
             return
 
-        # 5. Execute Bracket Order
-        await self._execute_trade(signal, qty)
+        # 5. Execute Virtual Bracket Order
+        await self._execute_trade(signal, notional_value)
 
     async def _build_groq_context(
         self,
@@ -348,28 +382,28 @@ class TradingEngine:
     async def _execute_trade(
         self,
         signal: GroqTradeSignal,
-        qty: int,
+        notional_value: float,
     ) -> None:
         """
-        Execute the bracket order and log to journal + Telegram.
+        Execute market entry order (fractional) and log to journal + Telegram.
+        Virtual brackets will be handled by the engine.
 
         Args:
             signal: Validated trade signal.
-            qty: Number of shares to trade.
+            notional_value: USD amount to invest.
         """
         try:
+            # Alpaca API: we use submit_simple_order using notional logic under the hood in AlpacaClient
             order = await asyncio.to_thread(
-                self.alpaca.submit_bracket_order,
+                self.alpaca.submit_notional_order,
                 symbol=signal.ticker,
-                qty=qty,
+                notional=notional_value,
                 side=OrderSide.BUY,
-                stop_loss_price=signal.stop_loss,
-                take_profit_price=signal.take_profit,
             )
 
             logger.success(
-                f"ORDER EXECUTED: BUY {qty} {signal.ticker} "
-                f"(order_id={order.id})",
+                f"ORDER EXECUTED: BUY ${notional_value:.2f} {signal.ticker} "
+                f"(Virtual Brackets: SL=${signal.stop_loss:.2f}, TP=${signal.take_profit:.2f})",
                 trade=True,
             )
 
@@ -378,7 +412,7 @@ class TradingEngine:
                 self.journal.log_entry,
                 ticker=signal.ticker,
                 side="BUY",
-                qty=qty,
+                qty=float(order.qty) if order.qty else 0.0,
                 entry_price=signal.entry_price_target,
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit,
@@ -395,7 +429,7 @@ class TradingEngine:
             await self.tg.send_trade_alert(
                 ticker=signal.ticker,
                 side="BUY",
-                qty=qty,
+                qty=notional_value, # Will format visually as amount in tg
                 price=signal.entry_price_target,
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit,
@@ -426,12 +460,44 @@ class TradingEngine:
         """
         symbol = bar.symbol
 
-        # Update cache with latest price
-        if bot_state.has_position(symbol):
-            logger.debug(
-                f"RT bar: {symbol} @ ${bar.close} "
-                f"(vol={bar.volume})"
-            )
+        # Virtual Bracket Monitoring (SL / TP Logic)
+        if hasattr(bot_state, "_lock"):
+            async with bot_state._lock:
+                pos = bot_state.positions.get(symbol)
+                
+        if pos and pos.trade_id and pos.stop_loss and pos.take_profit:
+            exit_reason = None
+            if bar.close <= pos.stop_loss:
+                exit_reason = "STOP_LOSS"
+            elif bar.close >= pos.take_profit:
+                exit_reason = "TAKE_PROFIT"
+                
+            if exit_reason:
+                logger.info(f"VIRTUAL BRACKET TRIGGERED: {symbol} hit {exit_reason} at ${bar.close:.2f}")
+                
+                # Execute exit order
+                try:
+                    await asyncio.to_thread(self.alpaca.close_position, symbol)
+                    # Log exit
+                    await asyncio.to_thread(
+                        self.journal.log_exit,
+                        trade_id=pos.trade_id,
+                        exit_price=float(bar.close),
+                        exit_reason=exit_reason,
+                    )
+                    # Notify
+                    await self.tg.send_alert(
+                        f"🔔 <b>VIRTUAL {exit_reason} EJECUTADO</b>\n"
+                        f"{symbol}: Precio cruzó umbral a ${bar.close:.2f}.\n"
+                        f"Posición cerrada."
+                    )
+                    # Manually remove from state until next sync
+                    if hasattr(bot_state, "_lock"):
+                        async with bot_state._lock:
+                            if symbol in bot_state.positions:
+                                del bot_state.positions[symbol]
+                except Exception as e:
+                    logger.error(f"Error executing virtual bracket for {symbol}: {e}")
 
     # ═══════════════════════════════════════
     # KELLY STATS UPDATE

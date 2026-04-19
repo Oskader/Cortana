@@ -132,42 +132,46 @@ class PortfolioSizer:
         )
         return position_value
 
-    def get_quantity(
+    def get_position_value(
         self,
         ticker: str,
-        entry_price: float,
         market_regime: str,
-    ) -> int:
+    ) -> float:
         """
-        Determine the exact number of shares to buy.
+        Determine the exact notional amount to risk.
+        Fractional shares support.
 
         Args:
             ticker: Stock ticker symbol.
-            entry_price: Estimated entry price per share.
             market_regime: Current market regime.
 
         Returns:
-            Integer number of shares (0 if calculation fails).
+            Float dollar amount to invest (0 if calculation fails).
         """
-        if entry_price <= 0:
-            logger.error(f"Invalid entry price for {ticker}: {entry_price}")
-            return 0
-
         position_value = self.calculate_position_value(
             market_regime=market_regime,
         )
 
-        qty = int(position_value / entry_price)
+        # Usar el Liquidity Cushion para verificar que tenemos suficiente efectivo total disponible
+        cushion = max(bot_state.equity * float(settings.model_dump().get("LIQUIDITY_CUSHION_PCT", 0.1)), 1.0)
+        available_cash = bot_state.buying_power - cushion
 
-        if qty <= 0:
+        if position_value > available_cash:
             logger.warning(
-                f"Qty=0 for {ticker} @ ${entry_price:.2f}. "
-                f"Position value ${position_value:.2f} too small."
+                f"Sizing {ticker}: Reduced size from ${position_value:.2f} "
+                f"to ${available_cash:.2f} due to liquidity cushion constraints."
             )
-            return 0
+            position_value = max(available_cash, 0.0)
 
+        if position_value < 1.00:  # Minimum valid order Alpaca is $1.00 usually
+            logger.warning(
+                f"Sizing {ticker}: Resulting value ${position_value:.2f} < $1.00 minimum. "
+                "Canceled."
+            )
+            return 0.0
+
+        position_value = round(position_value, 2)
         logger.info(
-            f"Sizing {ticker}: ${position_value:,.2f} / "
-            f"${entry_price:.2f} = {qty} shares"
+            f"Sizing {ticker}: Final notional position value = ${position_value:,.2f}"
         )
-        return qty
+        return position_value

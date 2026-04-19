@@ -38,7 +38,7 @@ def setup_logging() -> None:
     # General file handler
     logger.add(
         "logs/bot.log",
-        rotation="50 MB",
+        rotation="1 day",
         retention="7 days",
         level=settings.LOG_LEVEL,
         compression="zip",
@@ -49,7 +49,7 @@ def setup_logging() -> None:
     logger.add(
         "logs/trades.log",
         filter=lambda record: "trade" in record["extra"],
-        rotation="10 MB",
+        rotation="1 day",
         retention="30 days",
         level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",

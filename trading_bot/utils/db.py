@@ -10,7 +10,7 @@ Nota: Las operaciones son sincrónicas. Se ejecutan dentro de
 asyncio.to_thread() desde el engine para no bloquear el event loop.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -265,6 +265,35 @@ class TradeJournal:
         finally:
             session.close()
 
+    def get_open_trades(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all currently open trades to load Virtual Brackets.
+        
+        Returns:
+            Dict mapping ticker to trade details (stop_loss, take_profit, id).
+        """
+        session = self._get_session()
+        try:
+            trades = (
+                session.query(Trade)
+                .filter(Trade.exit_price.is_(None))
+                .all()
+            )
+            return {
+                t.ticker: {
+                    "id": t.id,
+                    "stop_loss": t.stop_loss,
+                    "take_profit": t.take_profit,
+                    "qty": t.qty,
+                }
+                for t in trades
+            }
+        except Exception as e:
+            logger.error(f"Error fetching open trades: {e}")
+            return {}
+        finally:
+            session.close()
+
     def get_recent_trades(
         self,
         limit: int = C.TRADES_HISTORY_LIMIT,
@@ -338,5 +367,29 @@ class TradeJournal:
                 "best_trade": max(pnls) if pnls else 0,
                 "worst_trade": min(pnls) if pnls else 0,
             }
+        finally:
+            session.close()
+
+    def count_day_trades_last_5_days(self) -> int:
+        """
+        Count closed 'round trips' (open and close same day) in the last 5 business days.
+        """
+        session = self._get_session()
+        try:
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            trades = (
+                session.query(Trade)
+                .filter(Trade.exit_price.isnot(None))
+                .filter(Trade.entry_time >= seven_days_ago)
+                .all()
+            )
+            day_trades = 0
+            for t in trades:
+                if t.exit_time and t.entry_time.date() == t.exit_time.date():
+                    day_trades += 1
+            return day_trades
+        except Exception as e:
+            logger.error(f"Error checking PDT day trades: {e}")
+            return 0
         finally:
             session.close()

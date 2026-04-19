@@ -29,6 +29,8 @@ class Screener:
             "BRK-B", "JPM", "V", "UNH", "MA", "PG", "HD", "DIS",
             "PYPL", "BAC", "VZ", "ADBE", "CMCSA", "NFLX", "KO",
             "PEP", "INTC", "CSCO", "AVGO", "COST", "TMO", "PFE", "ABT",
+            "AMD", "MSTR", "SMCI", "COIN", "PLTR", "ARM", "SQ", "UBER", "CRWD",
+            "SNOW", "SHOP", "SPOT", "TTD", "ROKU", "ZM", "DOCU", "PATH", "SE"
         ]
 
     def get_market_regime(self) -> str:
@@ -112,7 +114,7 @@ class Screener:
         return candidates[:10]
 
     def _check_volume_activity(self, ticker: str) -> bool:
-        """Check if a ticker has above-average volume today."""
+        """Check if a ticker has above-average volume today and satisfies basic liquidity/price rules."""
         t = yf.Ticker(ticker)
         data = t.history(period="2d")
 
@@ -120,6 +122,14 @@ class Screener:
             return False
 
         current_vol = float(data["Volume"].iloc[-1])
-        avg_vol = t.info.get("averageVolume", 1)
+        current_price = float(data["Close"].iloc[-1])
+        avg_vol = float(t.info.get("averageVolume", current_vol))
 
-        return current_vol > avg_vol * C.RELATIVE_VOLUME_THRESHOLD
+        # Basic constraints: Price $5 - $500, Minimum Volume 1M shares
+        is_liquid = current_vol >= 1_000_000
+        is_valid_price = 5.0 <= current_price <= 500.0
+        
+        # High relative volume filter
+        is_active = current_vol > (avg_vol * C.RELATIVE_VOLUME_THRESHOLD)
+
+        return is_liquid and is_valid_price and is_active

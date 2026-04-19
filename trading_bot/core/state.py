@@ -23,6 +23,7 @@ class PositionState(BaseModel):
     unrealized_pnl_pct: float
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    trade_id: Optional[int] = None
 
 
 class GlobalState:
@@ -50,6 +51,7 @@ class GlobalState:
 
         # Runtime
         self.is_running: bool = True
+        self.is_market_open: bool = False
         self.market_regime: str = REGIME_NEUTRAL
         self.last_update: datetime = datetime.now(timezone.utc)
 
