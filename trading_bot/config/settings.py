@@ -4,7 +4,7 @@ Todos los valores se cargan desde variables de entorno o .env file.
 """
 
 import json
-from typing import List, Any
+from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict

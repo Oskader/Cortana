@@ -10,7 +10,7 @@ Nota: Las operaciones son sincrónicas. Se ejecutan dentro de
 asyncio.to_thread() desde el engine para no bloquear el event loop.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -35,7 +35,7 @@ class Trade(Base):
     qty = Column(Float, nullable=False)
     entry_price = Column(Float, nullable=False)
     exit_price = Column(Float, nullable=True)
-    entry_time = Column(DateTime, default=datetime.utcnow)
+    entry_time = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     exit_time = Column(DateTime, nullable=True)
     stop_loss = Column(Float, nullable=True)
     take_profit = Column(Float, nullable=True)
@@ -122,7 +122,7 @@ class TradeJournal:
                 return
 
             trade.exit_price = exit_price
-            trade.exit_time = datetime.utcnow()
+            trade.exit_time = datetime.now(timezone.utc)
             trade.exit_reason = exit_reason
 
             # P&L calculation based on side

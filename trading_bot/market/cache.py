@@ -3,7 +3,7 @@ Cache con TTL para datos de mercado.
 Evita re-descargar datos en cada ciclo de análisis.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 
@@ -33,7 +33,7 @@ class MarketDataCache:
         """
         if key in self._cache:
             timestamp, value = self._cache[key]
-            if datetime.utcnow() - timestamp < self._ttl:
+            if datetime.now(timezone.utc) - timestamp < self._ttl:
                 return value
             del self._cache[key]
         return None
@@ -46,7 +46,7 @@ class MarketDataCache:
             key: Cache key.
             value: Value to store.
         """
-        self._cache[key] = (datetime.utcnow(), value)
+        self._cache[key] = (datetime.now(timezone.utc), value)
 
     def invalidate(self, key: str) -> None:
         """Remove a specific key from cache."""

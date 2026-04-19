@@ -8,7 +8,7 @@ Soporta:
     - Verificación de estado de órdenes
 """
 
-from typing import Dict
+from typing import Any, Dict
 
 import pandas as pd
 from alpaca.data.historical import StockHistoricalDataClient
@@ -56,17 +56,17 @@ class AlpacaClient:
     # ═══════════════════════════════════════
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
-    def get_account_info(self):
+    def get_account_info(self) -> Any:
         """Retrieve current account information."""
         return self.trading_client.get_account()
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
-    def get_positions(self):
+    def get_positions(self) -> Any:
         """List all open positions."""
         return self.trading_client.get_all_positions()
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
-    def close_position(self, symbol: str):
+    def close_position(self, symbol: str) -> Any:
         """Close an entire position for a given symbol."""
         logger.info(f"Closing full position for {symbol}", trade=True)
         return self.trading_client.close_position(symbol)
@@ -83,7 +83,7 @@ class AlpacaClient:
         side: OrderSide,
         stop_loss_price: float,
         take_profit_price: float,
-    ):
+    ) -> Any:
         """
         Submit a bracket order: entry + SL + TP as one atomic unit.
 
@@ -137,7 +137,7 @@ class AlpacaClient:
         symbol: str,
         qty: int,
         side: OrderSide,
-    ):
+    ) -> Any:
         """
         Submit a simple market order without brackets.
 
@@ -161,7 +161,7 @@ class AlpacaClient:
         return self.trading_client.submit_order(order_data)
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
-    def get_order_by_id(self, order_id: str):
+    def get_order_by_id(self, order_id: str) -> Any:
         """
         Check the status of an existing order.
 
@@ -209,7 +209,7 @@ class AlpacaClient:
             return pd.DataFrame()
 
     @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
-    def get_latest_quote(self, symbol: str):
+    def get_latest_quote(self, symbol: str) -> Any:
         """
         Get the latest quote for a symbol.
 

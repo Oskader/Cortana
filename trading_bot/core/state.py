@@ -4,7 +4,7 @@ Tracking completo de P&L diario, drawdown máximo, y régimen de mercado.
 """
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel
@@ -51,7 +51,7 @@ class GlobalState:
         # Runtime
         self.is_running: bool = True
         self.market_regime: str = REGIME_NEUTRAL
-        self.last_update: datetime = datetime.now()
+        self.last_update: datetime = datetime.now(timezone.utc)
 
         # Daily P&L tracking
         self._start_of_day_equity: float = 0.0
@@ -84,7 +84,7 @@ class GlobalState:
             self.balance = balance
             self.equity = equity
             self.buying_power = buying_power
-            self.last_update = datetime.now()
+            self.last_update = datetime.now(timezone.utc)
 
             # Reset daily tracking on new day
             today = date.today()
@@ -120,7 +120,7 @@ class GlobalState:
         """
         async with self._lock:
             self.positions = {p.symbol: p for p in positions_list}
-            self.last_update = datetime.now()
+            self.last_update = datetime.now(timezone.utc)
 
     async def set_market_regime(self, regime: str) -> None:
         """

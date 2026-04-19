@@ -15,7 +15,7 @@ Arquitectura:
 
 import asyncio
 import os
-from typing import Optional
+from typing import Any
 
 import pandas as pd
 from alpaca.data.timeframe import TimeFrame
@@ -410,7 +410,7 @@ class TradingEngine:
     # REALTIME BAR PROCESSING
     # ═══════════════════════════════════════
 
-    async def _on_realtime_bar(self, bar) -> None:
+    async def _on_realtime_bar(self, bar: Any) -> None:
         """
         Process a real-time bar from the WebSocket.
 
