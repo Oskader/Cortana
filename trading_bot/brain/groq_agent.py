@@ -234,7 +234,8 @@ class GroqAgent:
                 )
 
             raw_content = response.choices[0].message.content
-            return json.loads(raw_content)
+            cleaned_content = self._clean_json_response(raw_content)
+            return json.loads(cleaned_content)
 
         except asyncio.TimeoutError:
             logger.error(f"Groq timeout after {settings.GROQ_TIMEOUT}s")
@@ -250,6 +251,30 @@ class GroqAgent:
         except Exception as e:
             logger.error(f"Groq API error: {type(e).__name__}: {e}")
             return self._fallback_hold(f"Error API: {str(e)}")
+
+    def _clean_json_response(self, content: str) -> str:
+        """
+        Clean the raw content from Groq to ensure it's a valid JSON string.
+        Handles markdown code blocks (```json ... ```).
+        """
+        content = content.strip()
+        # Remove markdown fences if present
+        if content.startswith("```"):
+            # Split by lines and remove first and last line if they are fences
+            lines = content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+        
+        # In case the AI still included some text before/after the first/last { }
+        start_idx = content.find("{")
+        end_idx = content.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            content = content[start_idx : end_idx + 1]
+            
+        return content
 
     @staticmethod
     def _fallback_hold(reason: str) -> Dict[str, Any]:

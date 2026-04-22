@@ -85,8 +85,27 @@ class TradingEngine:
         
         # Verify Connectivity (Alpaca)
         try:
-            await asyncio.to_thread(self.alpaca.get_account_info)
-            logger.info("✅ Connected to Alpaca Markets")
+            account = await asyncio.to_thread(self.alpaca.get_account_info)
+            logger.info(f"✅ Connected to Alpaca Markets")
+            logger.info(f"   Account: {account.account_number}")
+            logger.info(f"   Status: {account.status}")
+            logger.info(f"   Equity: ${float(account.equity):,.2f}")
+            logger.info(f"   Buying Power: ${float(account.buying_power):,.2f}")
+            
+            # Verify account is ACTIVE and can trade
+            if account.status != "ACTIVE":
+                logger.critical(f"ACCOUNT NOT ACTIVE: {account.status}")
+                raise RuntimeError(f"Account status is {account.status}, not ACTIVE")
+            
+            if account.trading_blocked:
+                logger.critical("TRADING BLOCKED BY BROKER")
+                raise RuntimeError("Trading is blocked for this account")
+                
+            if settings.TRADING_MODE == "live":
+                logger.info("🔴 LIVE ACCOUNT MODE")
+            else:
+                logger.info("📄 Paper Trading Mode")
+                
         except Exception as e:
             logger.critical(f"Failed to connect to Alpaca: {e}")
             raise RuntimeError("API connectivity failure") from e
@@ -97,6 +116,9 @@ class TradingEngine:
 
         # Initialize Kelly stats from journal
         await self._update_kelly_stats()
+
+        # Reconcile positions (detect orphans)
+        await self._reconcile_positions()
 
         # Start Telegram (as background task)
         tg_task = asyncio.create_task(self.tg.run())
@@ -217,6 +239,36 @@ class TradingEngine:
             buying_power=float(acc.buying_power),
         )
 
+    async def _reconcile_positions(self) -> None:
+        """
+        Detect orphan positions (open in Alpaca but not in DB).
+        Alerts via Telegram if orphans are found.
+        """
+        logger.info("🔍 Reconciling positions...")
+        try:
+            alp_positions = await asyncio.to_thread(self.alpaca.get_positions)
+            open_trades_db = await asyncio.to_thread(self.journal.get_open_trades)
+            
+            orphans = []
+            for p in alp_positions:
+                if p.symbol not in open_trades_db:
+                    orphans.append(p.symbol)
+            
+            if orphans:
+                msg = (
+                    f"⚠️ <b>ALERTA DE RECONCILIACIÓN</b>\n"
+                    f"Se encontraron posiciones huérfanas en Alpaca sin registro en DB:\n"
+                    f"<code>{', '.join(orphans)}</code>\n\n"
+                    f"Estas posiciones NO tienen Virtual Brackets activos."
+                )
+                logger.warning(f"Orphan positions found: {orphans}")
+                await self.tg.send_alert(msg)
+            else:
+                logger.info("✅ Position reconciliation complete: No orphans.")
+                
+        except Exception as e:
+            logger.error(f"Error during position reconciliation: {e}")
+
     async def _sync_positions(self) -> None:
         """Fetch positions from Alpaca and update global state with Virtual Brackets from DB."""
         alp_positions = await asyncio.to_thread(self.alpaca.get_positions)
@@ -268,7 +320,15 @@ class TradingEngine:
         # Detect market regime
         regime = await asyncio.to_thread(self.screener.get_market_regime)
         await bot_state.set_market_regime(regime)
-        logger.info(f"Market regime: {regime}")
+        
+        # Update VIX in state for diagnostics
+        try:
+            vix = await asyncio.to_thread(self.screener._get_vix_level)
+            bot_state.last_vix = vix
+        except Exception as e:
+            logger.debug(f"Could not update VIX for diagnostics: {e}")
+            
+        logger.info(f"Market regime: {regime} | VIX: {bot_state.last_vix:.2f}")
 
         # Update Kelly stats periodically
         await self._update_kelly_stats()
@@ -432,7 +492,48 @@ class TradingEngine:
             notional_value: USD amount to invest.
         """
         try:
-            # Alpaca API: we use submit_simple_order using notional logic under the hood in AlpacaClient
+            # CRITICAL: Verify asset supports fractional shares before ordering
+            asset = await asyncio.to_thread(
+                self.alpaca.get_asset,
+                symbol=signal.ticker,
+            )
+            
+            if not asset.fractionable:
+                logger.warning(f"{signal.ticker} is NOT fractionable. Skipping.")
+                await self.tg.send_alert(
+                    f"⚠️ <b>{signal.ticker} no soporta fractional shares</b>\n"
+                    f"El activo no está habilitado para compras fraccionarias."
+                )
+                return
+                
+            logger.info(f"✓ {signal.ticker} verified: fractionable={asset.fractionable}")
+
+            # Ensure minimum notional ($1.00 is Alpaca's requirement for fractional orders)
+            if notional_value < 1.00:
+                logger.warning(f"Notional ${notional_value:.2f} < $1.00 minimum. Adjusting to $1.00")
+                notional_value = 1.00
+
+            # 1. Log PENDING entry to journal (DB First)
+            # This prevents orphaned positions if the bot crashes during execution
+            trade_id = await asyncio.to_thread(
+                self.journal.log_entry,
+                ticker=signal.ticker,
+                side="BUY",
+                qty=0.0,  # Unknown until filled
+                entry_price=signal.entry_price_target,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                confidence_score=signal.confidence,
+                groq_reasoning=signal.reasoning,
+                market_regime=bot_state.market_regime,
+                order_id="PENDING",
+            )
+
+            if trade_id == -1:
+                logger.error(f"Failed to log trade to DB for {signal.ticker}. Aborting execution.")
+                return
+
+            # 2. Submit order to Alpaca
             order = await asyncio.to_thread(
                 self.alpaca.submit_notional_order,
                 symbol=signal.ticker,
@@ -440,25 +541,36 @@ class TradingEngine:
                 side=OrderSide.BUY,
             )
 
+            # 3. CRITICAL: Verify order was accepted (not rejected)
+            if order.status in ("rejected", "expired", "canceled"):
+                logger.error(f"❌ Order REJECTED: {order.status} - {order.reject_reason}")
+                # We should probably mark the trade as REJECTED in DB too
+                await asyncio.to_thread(
+                    self.journal.log_exit,
+                    trade_id=trade_id,
+                    exit_price=0.0,
+                    exit_reason=f"REJECTED_{order.status.upper()}",
+                )
+                await self.tg.send_alert(
+                    f"❌ <b>ÓRDEN RECHAZADA</b>\n"
+                    f"{signal.ticker}: {order.status}\n"
+                    f"Razón: {order.reject_reason or 'Unknown'}"
+                )
+                return
+
             logger.success(
                 f"ORDER EXECUTED: BUY ${notional_value:.2f} {signal.ticker} "
                 f"(Virtual Brackets: SL=${signal.stop_loss:.2f}, TP=${signal.take_profit:.2f})",
                 trade=True,
             )
 
-            # Log to journal
+            # 4. Update trade in journal with real order_id and estimated qty
+            # Note: qty might be updated again by sync_positions later
             await asyncio.to_thread(
-                self.journal.log_entry,
-                ticker=signal.ticker,
-                side="BUY",
-                qty=float(order.qty) if order.qty else 0.0,
-                entry_price=signal.entry_price_target,
-                stop_loss=signal.stop_loss,
-                take_profit=signal.take_profit,
-                confidence_score=signal.confidence,
-                groq_reasoning=signal.reasoning,
-                market_regime=bot_state.market_regime,
+                self.journal.update_trade_after_fill,
+                trade_id=trade_id,
                 order_id=str(order.id),
+                qty=float(order.qty) if order.qty else 0.0,
             )
 
             # Update trade counter
@@ -547,5 +659,6 @@ class TradingEngine:
         try:
             stats = await asyncio.to_thread(self.journal.get_basic_stats)
             self.sizer.update_stats_from_journal(stats)
+            bot_state.kelly_trades = stats.get("trades", 0)
         except Exception as e:
             logger.warning(f"Error updating Kelly stats: {e}")

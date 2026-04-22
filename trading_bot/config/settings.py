@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # ═══ GROQ AI ═══
     GROQ_API_KEY: str
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
-    GROQ_MIN_CONFIDENCE: float = 0.72
+    GROQ_MIN_CONFIDENCE: float = 0.60
+    GROQ_MIN_SCORE: float = 6.0
     GROQ_TIMEOUT: int = 15
     GROQ_MAX_CONTEXT_TOKENS: int = 8000
 
@@ -35,10 +36,13 @@ class Settings(BaseSettings):
 
     # ═══ TRADING PARAMETERS ═══
     TRADING_MODE: str = "paper"  # "paper" | "live"
-    MAX_DAILY_LOSS_PCT: float = 0.05
+    MAX_DAILY_LOSS_PCT: float = 0.015
     MAX_POSITION_SIZE_PCT: float = 0.20
-    MAX_OPEN_POSITIONS: int = 4
+    MAX_OPEN_POSITIONS: int = 2
     MAX_DAILY_TRADES: int = 3  # PDT-safe limit
+    LIQUIDITY_CUSHION_PCT: float = 0.10
+    DRAWDOWN_PAUSE_PCT: float = -0.15
+    DRAWDOWN_HALT_PCT: float = -0.25
 
     # ═══ SCREENER & STRATEGY ═══
     WATCHLIST_SYMBOLS: Any = [

@@ -61,10 +61,9 @@ class PortfolioSizer:
                 f"(from {stats.get('trades')} trades)"
             )
         else:
-            logger.debug(
-                f"Not enough trades for real Kelly stats "
-                f"({stats.get('trades', 0)} < {C.KELLY_MIN_SAMPLE_SIZE}), "
-                f"using defaults"
+            logger.info(
+                f"Kelly: Insufficient history ({stats.get('trades', 0)} < {C.KELLY_MIN_SAMPLE_SIZE}). "
+                f"Using safe fallbacks: WR={self.win_rate:.0%}, RR={self.avg_win/self.avg_loss:.1f}"
             )
 
     def calculate_kelly_fraction(self) -> float:

@@ -65,6 +65,10 @@ class GlobalState:
         self.peak_equity: float = 0.0
         self.max_drawdown: float = 0.0
 
+        # Diagnostics
+        self.last_vix: float = 0.0
+        self.kelly_trades: int = 0
+
         # Trade counter (PDT protection)
         self.trades_today: int = 0
 

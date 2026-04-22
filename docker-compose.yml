@@ -8,6 +8,8 @@ services:
     volumes:
       - bot_data:/app/data
       - bot_logs:/app/logs
+    environment:
+      - RAILWAY_VOLUME=/app/data
     restart: unless-stopped
     logging:
       driver: "json-file"

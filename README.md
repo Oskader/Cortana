@@ -39,3 +39,17 @@ Consulta el archivo `growth_plan.md` si cuentas con planes para escalar el capit
 
 ## Disclaimer Risk
 El software de ejecución ejecuta Fractional Buying y no tiene afiliación con los brokers. Revisa siempre el funcionamiento en modo "paper" operando hasta asegurar la rentabilidad.
+
+## 💾 PERSISTENCIA DE DATOS (RAILWAY)
+
+**CRÍTICO:** Railway utiliza un sistema de archivos efímero. Si no configuras un **Volume**, la base de datos `trading_bot.db` se borrará en cada redeploy, reseteando tus estadísticas de Kelly y PDT.
+
+### Pasos para configurar el Volumen:
+1. Ve a tu proyecto en el Dashboard de Railway.
+2. Haz clic en **+ New** -> **Volume**.
+3. Ponle un nombre (ej: `cortana_data`).
+4. En la configuración del servicio Cortana, ve a **Settings** -> **Volumes** -> **Mount Volume**.
+5. **Mount Path:** `/app/data` (Debe coincidir exactamente con el directorio de la DB).
+6. Haz redeploy.
+
+Ahora tus trades y configuraciones persistirán entre reinicios y actualizaciones.

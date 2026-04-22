@@ -100,6 +100,29 @@ class TradeJournal:
         finally:
             session.close()
 
+    def update_trade_after_fill(
+        self,
+        trade_id: int,
+        order_id: str,
+        qty: float,
+    ) -> None:
+        """
+        Update trade details after order submission or partial fill.
+        """
+        session = self._get_session()
+        try:
+            trade = session.query(Trade).filter(Trade.id == trade_id).first()
+            if trade:
+                trade.order_id = order_id
+                trade.qty = qty
+                session.commit()
+                logger.debug(f"Trade {trade_id} updated with order_id {order_id} and qty {qty}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating trade {trade_id}: {e}")
+        finally:
+            session.close()
+
     def log_exit(
         self,
         trade_id: int,

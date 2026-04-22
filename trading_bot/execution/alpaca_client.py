@@ -201,6 +201,19 @@ class AlpacaClient:
         """
         return self.trading_client.get_order_by_id(order_id)
 
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3))
+    def get_asset(self, symbol: str) -> Any:
+        """
+        Get asset details to check if fractional shares are supported.
+
+        Args:
+            symbol: Ticker symbol.
+
+        Returns:
+            Asset object with fractionable flag.
+        """
+        return self.trading_client.get_asset(symbol)
+
     # ═══════════════════════════════════════
     # MARKET DATA
     # ═══════════════════════════════════════

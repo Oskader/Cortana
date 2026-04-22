@@ -8,6 +8,7 @@ Institucional-grade algorithmic trading bot powered by:
 """
 
 import asyncio
+import os
 import sys
 
 import portalocker
@@ -31,11 +32,18 @@ async def main() -> None:
     logger.info("═══ CORTANA BOT — INICIANDO ═══")
 
     # Prevent multiple instances running concurrently
-    lock_file = open("cortana_bot.lock", "w")
+    lock_path = "cortana_bot.lock"
+    lock_file = open(lock_path, "w")
     try:
         portalocker.lock(lock_file, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        logger.info(f"Lock acquired (PID: {os.getpid()})")
     except portalocker.exceptions.LockException:
         logger.critical("FATAL ERROR: Otra instancia de Cortana ya está ejecutándose.")
+        sys.exit(1)
+    except Exception as e:
+        logger.critical(f"FATAL ERROR: No se pudo crear el lock file: {e}")
         sys.exit(1)
 
     engine = TradingEngine()
