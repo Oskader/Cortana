@@ -25,7 +25,7 @@ def setup_logging() -> None:
 
     # Console handler (colored)
     logger.add(
-        sys.stderr,
+        sys.stdout,
         level=settings.LOG_LEVEL,
         format=(
             "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "

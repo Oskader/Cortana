@@ -27,6 +27,7 @@ except Exception as e:
 
 async def main() -> None:
     """Initialize and run the trading engine."""
+    print("CORTANA BOOT: main.py reached", flush=True)
     setup_logging()
 
     logger.info("═══ CORTANA BOT — INICIANDO ═══")
